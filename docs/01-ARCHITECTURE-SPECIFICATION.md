@@ -54,7 +54,7 @@ BetterCallClaudeMCP is a Model Context Protocol (MCP) implementation that ports 
         │                                          │
         │  • Fedlex SPARQL Endpoint               │
         │  • Bundesgericht API                    │
-        │  • Cantonal Court APIs (ZH,BE,GE,BS,VD,TI) │
+        │  • Cantonal Court APIs (all 26 cantons)    │
         │  • Entscheidsuche.ch                    │
         └─────────────────────────────────────────┘
 ```
@@ -176,7 +176,8 @@ User Query
 | **Fedlex SPARQL** | `https://fedlex.data.admin.ch/sparqlendpoint` | Federal legislation |
 | **Bundesgericht** | `https://www.bger.ch/` | Federal court decisions |
 | **Entscheidsuche** | `https://entscheidsuche.ch/` | Court decision search |
-| **Cantonal Courts** | Various per canton | Cantonal decisions |
+| **BGE-Search** | bge-search MCP server | Targeted Federal Supreme Court search |
+| **Cantonal Courts** | Various per canton | Cantonal decisions (all 26 cantons) |
 
 ### 5.2 API Client Architecture
 
@@ -358,7 +359,7 @@ Attempt 4 → Return error with retry hints
 |-------|------------|
 | Citations | Regex pattern matching |
 | Queries | Length limits, sanitization |
-| Cantons | Whitelist (ZH,BE,GE,BS,VD,TI) |
+| Cantons | All 26 Swiss cantons |
 | Languages | Whitelist (de,fr,it,en) |
 
 ---
@@ -434,14 +435,13 @@ claude mcp add legal-core -- node ./dist/index.js
 |------------|-------------|
 | **No Offline Mode** | Requires internet connection |
 | **Public APIs Only** | No premium legal database access |
-| **6 Cantons** | ZH, BE, GE, BS, VD, TI only |
+| **26 Cantons** | Full cantonal coverage |
 | **Real-Time Only** | No persistent storage |
 
 ### 12.2 Future Considerations
 
 | Feature | Status |
 |---------|--------|
-| All 26 cantons | Planned v2.0 |
 | Swisslex integration | Requires API key handling |
 | Offline caching | Not planned |
 | Document generation (PDF) | Planned v1.5 |

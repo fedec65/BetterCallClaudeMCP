@@ -23,8 +23,17 @@
 | `drafter` | Document generation |
 | `compliance` | FINMA, AML/KYC |
 | `data-protection` | GDPR, nDSG |
+| `risk-analyst` | Case outcome scoring & risk assessment |
+| `procedure` | ZPO/StPO deadlines & procedural law |
 | `fiscal-expert` | Tax law, DTAs |
 | `corporate` | M&A, governance |
+| `real-estate` | Property transactions, Grundbuch |
+| `translator` | Legal translations DE/FR/IT/EN |
+| `cantonal-law` | All 26 Swiss cantons |
+| `citation` | Citation validation & formatting |
+| `advocate` | Adversarial - argues for position |
+| `adversary` | Adversarial - argues against position |
+| `judicial` | Adversarial - evaluates arguments |
 | `orchestrator` | Multi-agent workflows |
 
 ### Workflows (`--workflow`)
@@ -33,6 +42,8 @@
 | `due-diligence` | researcher → corporate → risk-analyst |
 | `litigation-prep` | strategist → researcher → drafter |
 | `adversarial` | advocate → adversary → judicial |
+| `contract-lifecycle` | drafter → data-protection → compliance |
+| `real-estate-closing` | real-estate → fiscal-expert → drafter |
 
 ## Project Structure
 
