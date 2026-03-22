@@ -1,0 +1,44 @@
+{
+  "name": "tas-jurisprudence",
+  "version": "1.0.0",
+  "description": "MCP server for TAS/CAS (Court of Arbitration for Sport) jurisprudence",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsc-watch --onSuccess \"node dist/index.js\"",
+    "test": "vitest",
+    "test:run": "vitest run",
+    "lint": "eslint src --ext .ts"
+  },
+  "keywords": [
+    "mcp",
+    "tas",
+    "cas",
+    "sports-arbitration",
+    "legal"
+  ],
+  "author": "BetterCallClaude",
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "cheerio": "^1.0.0",
+    "cors": "^2.8.5",
+    "express": "^4.18.2",
+    "lru-cache": "^10.2.0",
+    "playwright": "^1.40.0",
+    "zod": "^3.22.4"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.11.0",
+    "typescript": "^5.3.3",
+    "vitest": "^1.2.0",
+    "tsc-watch": "^2.2.2"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

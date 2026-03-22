@@ -1,0 +1,280 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<evaluation>
+  <metadata>
+    <name>TAS/CAS Jurisprudence MCP Server Evaluation</name>
+    <version>1.0.0</version>
+    <created>2026-03-21</created>
+    <description>Test cases for validating TAS/CAS Jurisprudence MCP server functionality</description>
+  </metadata>
+
+  <testCases>
+    <!-- Test Case 1: Basic Search -->
+    <testCase id="TC-001">
+      <name>Search for recent doping cases in cycling</name>
+      <tool>cas_search</tool>
+      <input>
+        {
+          "query": "doping",
+          "sport": "Cycling",
+          "year_from": 2020,
+          "page_size": 10
+        }
+      </input>
+      <expectedOutcome>
+        <statusCode>200</statusCode>
+        <resultStructure>
+          <hasProperty>decisions</hasProperty>
+          <hasProperty>total_results</hasProperty>
+          <hasProperty>page</hasProperty>
+        </resultStructure>
+        <validation>
+          Results should contain cycling-related doping cases from 2020 onwards
+        </validation>
+      </expectedOutcome>
+    </testCase>
+
+    <!-- Test Case 2: Get Award by Case Number -->
+    <testCase id="TC-002">
+      <name>Get award details by case number</name>
+      <tool>cas_get_award</tool>
+      <input>
+        {
+          "case_number": "CAS 2023/A/9876",
+          "include_full_text": false
+        }
+      </input>
+      <expectedOutcome>
+        <statusCode>200</statusCode>
+        <resultStructure>
+          <hasProperty>case_number</hasProperty>
+          <hasProperty>parties</hasProperty>
+          <hasProperty>arbitrators</hasProperty>
+          <hasProperty>operative_part</hasProperty>
+        </resultStructure>
+        <validation>
+          Should return structured award metadata without full text
+        </validation>
+      </expectedOutcome>
+    </testCase>
+
+    <!-- Test Case 3: Recent Decisions -->
+    <testCase id="TC-003">
+      <name>List recent decisions</name>
+      <tool>cas_recent</tool>
+      <input>
+        {
+          "limit": 10
+        }
+      </input>
+      <expectedOutcome>
+        <statusCode>200</statusCode>
+        <resultStructure>
+          <hasProperty>decisions</hasProperty>
+          <hasProperty>last_updated</hasProperty>
+          <hasProperty>source</hasProperty>
+        </resultStructure>
+        <validation>
+          Should return up to 10 recent decisions with basic metadata
+        </validation>
+      </expectedOutcome>
+    </testCase>
+
+    <!-- Test Case 4: Browse by Sport -->
+    <testCase id="TC-004">
+      <name>Browse all football-related cases</name>
+      <tool>cas_by_sport</tool>
+      <input>
+        {
+          "sport": "Football",
+          "page": 1
+        }
+      </input>
+      <expectedOutcome>
+        <statusCode>200</statusCode>
+        <resultStructure>
+          <hasProperty>decisions</hasProperty>
+          <hasProperty>sport</hasProperty>
+          <hasProperty>total_for_sport</hasProperty>
+        </resultStructure>
+        <validation>
+          All returned decisions should be football-related
+        </validation>
+      </expectedOutcome>
+    </testCase>
+
+    <!-- Test Case 5: Search with Year Range -->
+    <testCase id="TC-005">
+      <name>Search with year range filter</name>
+      <tool>cas_search</tool>
+      <input>
+        {
+          "query": "contract dispute",
+          "year_from": 2015,
+          "year_to": 2020,
+          "page_size": 15
+        }
+      </input>
+      <expectedOutcome>
+        <statusCode>200</statusCode>
+        <resultStructure>
+          <hasProperty>decisions</hasProperty>
+        </resultStructure>
+        <validation>
+          All decisions should be from 2015-2020 range
+        </validation>
+      </expectedOutcome>
+    </testCase>
+
+    <!-- Test Case 6: Get Operative Part -->
+    <testCase id="TC-006">
+      <name>Get operative part of specific award</name>
+      <tool>cas_get_award</tool>
+      <input>
+        {
+          "url": "https://jurisprudence.tas-cas.org/award/12345",
+          "include_full_text": false
+        }
+      </input>
+      <expectedOutcome>
+        <statusCode>200</statusCode>
+        <resultStructure>
+          <hasProperty>operative_part</hasProperty>
+        </resultStructure>
+        <validation>
+          Should extract operative part (dispositive) from award page
+        </validation>
+      </expectedOutcome>
+    </testCase>
+
+    <!-- Test Case 7: Keyword Search -->
+    <testCase id="TC-007">
+      <name>Search for strict liability keyword</name>
+      <tool>cas_search</tool>
+      <input>
+        {
+          "query": "strict liability",
+          "procedure_type": "Anti-Doping",
+          "page_size": 10
+        }
+      </input>
+      <expectedOutcome>
+        <statusCode>200</statusCode>
+        <resultStructure>
+          <hasProperty>decisions</hasProperty>
+        </resultStructure>
+        <validation>
+          Results should be anti-doping cases discussing strict liability
+        </validation>
+      </expectedOutcome>
+    </testCase>
+
+    <!-- Test Case 8: Browse by Procedure Type -->
+    <testCase id="TC-008">
+      <name>Browse by procedure type (Appeal)</name>
+      <tool>cas_search</tool>
+      <input>
+        {
+          "query": "",
+          "procedure_type": "Appeal",
+          "page_size": 20
+        }
+      </input>
+      <expectedOutcome>
+        <statusCode>200</statusCode>
+        <resultStructure>
+          <hasProperty>decisions</hasProperty>
+        </resultStructure>
+        <validation>
+          All results should be Appeal procedure type
+        </validation>
+      </expectedOutcome>
+    </testCase>
+
+    <!-- Test Case 9: Case Number Normalization -->
+    <testCase id="TC-009">
+      <name>Verify case number normalization</name>
+      <tool>cas_get_award</tool>
+      <input>
+        {
+          "case_number": "2023/A/9876",
+          "include_full_text": false
+        }
+      </input>
+      <expectedOutcome>
+        <statusCode>200</statusCode>
+        <resultStructure>
+          <hasProperty>case_number</hasProperty>
+        </resultStructure>
+        <validation>
+          Case number should be normalized to "CAS 2023/A/9876" format
+        </validation>
+      </expectedOutcome>
+    </testCase>
+
+    <!-- Test Case 10: Rate Limiting -->
+    <testCase id="TC-010">
+      <name>Test rate limiting behavior</name>
+      <tool>cas_search</tool>
+      <input>
+        {
+          "query": "test query 1"
+        }
+      </input>
+      <followUpInput>
+        {
+          "query": "test query 2"
+        }
+      </followUpInput>
+      <expectedOutcome>
+        <statusCode>200</statusCode>
+        <validation>
+          Second request should respect 10-second crawl-delay from robots.txt.
+          Verify timing between consecutive requests.
+        </validation>
+      </expectedOutcome>
+    </testCase>
+  </testCases>
+
+  <evaluationCriteria>
+    <criterion id="EC-001">
+      <name>Response Time</name>
+      <description>Tool responses should complete within reasonable timeframes</description>
+      <thresholds>
+        <search>30s</search>
+        <getAward>20s</getAward>
+        <recent>15s</recent>
+        <bySport>30s</bySport>
+      </thresholds>
+    </criterion>
+
+    <criterion id="EC-002">
+      <name>Data Accuracy</name>
+      <description>Returned data should accurately reflect CAS database content</description>
+      <validation>
+        - Case numbers should follow CAS format
+        - Dates should be valid ISO 8601
+        - URLs should be valid CAS domains
+      </validation>
+    </criterion>
+
+    <criterion id="EC-003">
+      <name>Error Handling</name>
+      <description>Server should handle errors gracefully</description>
+      <validation>
+        - Invalid inputs should return 400 with descriptive error
+        - Network failures should return 503 with retry guidance
+        - Missing resources should return 404
+      </validation>
+    </criterion>
+
+    <criterion id="EC-004">
+      <name>Caching Effectiveness</name>
+      <description>Repeated queries should benefit from caching</description>
+      <validation>
+        - Cache hits should return in &lt;1s
+        - Cache TTLs should match specification
+        - Cache keys should be deterministic
+      </validation>
+    </criterion>
+  </evaluationCriteria>
+</evaluation>
