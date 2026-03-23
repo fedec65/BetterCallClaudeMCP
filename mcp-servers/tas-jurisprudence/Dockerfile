@@ -9,6 +9,9 @@ COPY package*.json ./
 # Install production dependencies
 RUN npm ci --only=production
 
+# Install Playwright browsers (ensure they're available)
+RUN npx playwright install chromium
+
 # Copy built files
 COPY dist ./dist
 
