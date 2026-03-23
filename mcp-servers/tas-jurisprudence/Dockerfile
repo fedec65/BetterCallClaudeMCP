@@ -1,39 +1,27 @@
-# Use Node.js image and install Playwright during build
-FROM node:20-bookworm
+# Multi-stage build for Railway
+# Stage 1: Install dependencies andFROM node:20-bookworm AS builder
 
 WORKDIR /app
 
-# Install Playwright dependencies
-RUN apt-get update && apt-get install -y \
-    libnss3 \
-    libnspr4 \
-    libatk1.0-0 \
-    libatk-bridge2.0-0 \
-    libcups2 \
-    libdrm2 \
-    libxkbcommon0 \
-    libxcomposite1 \
-    libxdamage1 \
-    libxfixes3 \
-    libxrandr2 \
-    libgbm1 \
-    libpango-1.0-0 \
-    libcairo2 \
-    libasound2 \
-    libatspi2.0-0 \
-    && rm -rf /var/lib/apt/lists/*
-
 # Copy package files
-COPY package*.json ./
+COPY mcp-servers/tas-jurisprudence/package*.json ./
 
-# Install dependencies
-RUN npm ci --only=production
+# Install all dependencies
+RUN npm ci
+
+# Stage 2: Copy built files andFROM node:20-bookworm AS runner
+
+WORKDIR /app
+
+# Copy built files
+COPY mcp-servers/tas-jurisprudence/dist ./dist
 
 # Install Playwright browsers
 RUN npx playwright install chromium --with-deps
 
-# Copy built files
-COPY dist ./dist
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:8080/health || exit 1
 
 # Expose port
 EXPOSE 8080
@@ -41,10 +29,6 @@ EXPOSE 8080
 # Set environment
 ENV NODE_ENV=production
 ENV PORT=8080
-
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:8080/health || exit 1
 
 # Start the server
 CMD ["npm", "start"]
