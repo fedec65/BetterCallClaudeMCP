@@ -1,42 +1,43 @@
 /**
- * TAS/CAS Jurisprudence MCP Server - Playwright Browser Client
+ * TAS/CAS Jurisprudence MCP Server - Playwright Client
  * Singleton browser instance management for JavaScript-rendered content
  */
 
-import { chromium, Browser, Page, BrowserContext } from 'playwright';
-import { CAS_CONSTANTS } from '../types.js';
+import { chromium, type Browser, type Page, type BrowserContext } from 'playwright';
+import { DEFAULT_SCRAPER_CONFIG } from '../types.js';
 
 /**
- * Playwright browser client configuration
+ * Playwright client configuration
  */
-interface PlaywrightConfig {
-  headless: boolean;
-  timeout: number;
-  slowMo: number;
+export interface PlaywrightConfig {
+  headless?: boolean;
+  timeout?: number;
+  userAgent?: string;
 }
 
 /**
- * Singleton Playwright browser manager
+ * Singleton Playwright browser client
+ * Manages a single browser instance for all scraping operations
  */
 export class PlaywrightClient {
-  private static instance: PlaywrightClient;
+  private static instance: PlaywrightClient | null = null;
   private browser: Browser | null = null;
   private context: BrowserContext | null = null;
   private config: PlaywrightConfig;
 
-  private constructor(config?: Partial<PlaywrightConfig>) {
+  private constructor(config: PlaywrightConfig = {}) {
     this.config = {
       headless: true,
-      timeout: CAS_CONSTANTS.PAGE_TIMEOUT_MS,
-      slowMo: 0,
+      timeout: DEFAULT_SCRAPER_CONFIG.timeout,
+      userAgent: DEFAULT_SCRAPER_CONFIG.userAgent,
       ...config
     };
   }
 
   /**
-   * Get singleton instance
+   * Get the singleton instance
    */
-  static getInstance(config?: Partial<PlaywrightConfig>): PlaywrightClient {
+  static getInstance(config?: PlaywrightConfig): PlaywrightClient {
     if (!PlaywrightClient.instance) {
       PlaywrightClient.instance = new PlaywrightClient(config);
     }
@@ -44,20 +45,18 @@ export class PlaywrightClient {
   }
 
   /**
-   * Initialize or get browser instance
+   * Get or create the browser instance
    */
   async getBrowser(): Promise<Browser> {
     if (!this.browser || !this.browser.isConnected()) {
       this.browser = await chromium.launch({
         headless: this.config.headless,
-        slowMo: this.config.slowMo,
         args: [
           '--no-sandbox',
           '--disable-setuid-sandbox',
           '--disable-dev-shm-usage',
           '--disable-gpu',
-          '--disable-web-security',
-          '--disable-features=IsolateOrigins,site-per-process'
+          '--disable-web-security'
         ]
       });
     }
@@ -65,14 +64,14 @@ export class PlaywrightClient {
   }
 
   /**
-   * Create or get browser context
+   * Get or create a browser context
    */
   async getContext(): Promise<BrowserContext> {
     if (!this.context) {
       const browser = await this.getBrowser();
       this.context = await browser.newContext({
-        userAgent: CAS_CONSTANTS.USER_AGENT,
-        viewport: { width: 1920, height: 1080 },
+        userAgent: this.config.userAgent,
+        viewport: { width: 1280, height: 720 },
         javaScriptEnabled: true,
         ignoreHTTPSErrors: true
       });
@@ -81,21 +80,21 @@ export class PlaywrightClient {
   }
 
   /**
-   * Create a new page
+   * Create a new page with default settings
    */
   async newPage(): Promise<Page> {
     const context = await this.getContext();
     const page = await context.newPage();
-
+    
     // Set default timeout
-    page.setDefaultTimeout(this.config.timeout);
-    page.setDefaultNavigationTimeout(this.config.timeout);
+    page.setDefaultTimeout(this.config.timeout!);
+    page.setDefaultNavigationTimeout(this.config.timeout!);
 
     return page;
   }
 
   /**
-   * Close browser and cleanup
+   * Close the browser and cleanup
    */
   async close(): Promise<void> {
     if (this.context) {
@@ -106,68 +105,62 @@ export class PlaywrightClient {
       await this.browser.close();
       this.browser = null;
     }
+    PlaywrightClient.instance = null;
   }
 
   /**
-   * Check if browser is running
+   * Check if browser is connected
    */
   isConnected(): boolean {
     return this.browser?.isConnected() ?? false;
   }
-
-  /**
-   * Get browser stats for monitoring
-   */
-  getStats(): { connected: boolean; hasContext: boolean } {
-    return {
-      connected: this.isConnected(),
-      hasContext: this.context !== null
-    };
-  }
 }
 
 /**
- * Convenience function to get Playwright client instance
- */
-export function getPlaywrightClient(config?: Partial<PlaywrightConfig>): PlaywrightClient {
-  return PlaywrightClient.getInstance(config);
-}
-
-/**
- * Helper function to execute browser operations with automatic cleanup
+ * Execute a scraping operation with automatic page management
  */
 export async function withPage<T>(
-  fn: (page: Page) => Promise<T>
+  fn: (page: Page) => Promise<T>,
+  config?: PlaywrightConfig
 ): Promise<T> {
-  const client = getPlaywrightClient();
+  const client = PlaywrightClient.getInstance(config);
   const page = await client.newPage();
 
   try {
     return await fn(page);
   } finally {
-    await page.close().catch(() => {});
+    await page.close();
   }
 }
 
 /**
- * Graceful shutdown handler
+ * Navigate to a URL and wait for content to load
  */
-export function setupGracefulShutdown(): void {
-  const client = getPlaywrightClient();
-
-  const shutdown = async (): Promise<void> => {
-    console.log('Closing Playwright browser...');
-    await client.close();
-  };
-
-  process.on('SIGTERM', shutdown);
-  process.on('SIGINT', shutdown);
+export async function navigateAndWait(
+  page: Page,
+  url: string,
+  waitUntil: 'load' | 'domcontentloaded' | 'networkidle' = 'networkidle'
+): Promise<void> {
+  await page.goto(url, { waitUntil });
+  
+  // Additional wait for any lazy-loaded content
+  await page.waitForTimeout(1000);
 }
 
 /**
- * Close browser - exported for external shutdown handling
+ * Take a screenshot for debugging
  */
-export async function closeBrowser(): Promise<void> {
-  const client = getPlaywrightClient();
-  await client.close();
+export async function takeScreenshot(page: Page, path: string): Promise<void> {
+  await page.screenshot({ path, fullPage: true });
 }
+
+// Graceful shutdown
+process.on('SIGTERM', async () => {
+  const client = PlaywrightClient.getInstance();
+  await client.close();
+});
+
+process.on('SIGINT', async () => {
+  const client = PlaywrightClient.getInstance();
+  await client.close();
+});

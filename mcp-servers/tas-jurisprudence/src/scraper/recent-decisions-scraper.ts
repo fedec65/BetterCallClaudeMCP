@@ -1,197 +1,184 @@
 /**
  * TAS/CAS Jurisprudence MCP Server - Recent Decisions Scraper
- * Uses main search endpoint to get recent decisions (sorted by date by default)
+ * Scrapes the simpler recent decisions page from tas-cas.org
  */
 
 import * as cheerio from 'cheerio';
-import { Page } from 'playwright';
-import {
-  CasRecentOutput,
-  RecentDecision,
-  CAS_CONSTANTS
-} from '../types.js';
-import { getRateLimiter } from '../infrastructure/rate-limiter.js';
-import { withPage } from './playwright-client.js';
-import { cleanText, normalizeCaseNumber, generatePdfUrl } from '../utils.js';
+import type { AnyNode } from 'domhandler';
+import type { CasRecentOutput, CasRecentDecision } from '../types.js';
+import { normalizeCaseNumber, generatePdfUrl, cleanText } from '../utils.js';
+import { recentCache } from '../infrastructure/cache.js';
+import { tasCasRateLimiter } from '../infrastructure/rate-limiter.js';
+import { fetchText } from '../infrastructure/http-client.js';
+
+const RECENT_URL = 'https://www.tas-cas.org/en/jurisprudence/recent-decisions.html';
 
 /**
- * CSS selectors for the search results table (same as main scraper)
- * Table columns: Lang(1), Year(2), Proc.(3), Case#(4), Appellant(5), Respondent(6), Sport(7), Matter(8), Date(9), Outcome(10)
- * NOTE: Case number is split across columns 2,3,4 - need to combine Year/Proc/Number
+ * Parse a recent decision from HTML
  */
-const SELECTORS = {
-  resultsContainer: 'table, tbody, .results-table',
-  resultRow: 'tbody tr',
-  year: 'td:nth-child(2)',
-  procedureType: 'td:nth-child(3)',
-  caseNumberSeq: 'td:nth-child(4)', // Just the sequential number, e.g., "10168"
-  appellant: 'td:nth-child(5)',
-  respondent: 'td:nth-child(6)',
-  sport: 'td:nth-child(7)',
-  matter: 'td:nth-child(8)',
-  date: 'td:nth-child(9)',
-  outcome: 'td:nth-child(10)'
-};
+function parseRecentDecision($: cheerio.CheerioAPI, element: AnyNode): CasRecentDecision | null {
+  const $el = $(element);
+  
+  try {
+    // Find case number in text
+    const text = $el.text();
+    const caseMatch = text.match(/(?:CAS|TAS)?\s*(\d{4}\/[AO]|AD|ADV\/\d+)/i);
+    
+    if (!caseMatch) return null;
+
+    const caseNumber = caseMatch[0];
+    const normalizedCaseNumber = normalizeCaseNumber(caseNumber);
+
+    // Extract title (usually in a heading or link)
+    const title = $el.find('a, h3, h4, strong').first().text().trim() || 
+                  $el.text().trim().substring(0, 100);
+
+    // Extract date
+    const dateMatch = text.match(/(\d{1,2}[\s\/]\w+[\s\/]\d{4}|\d{4}[\-\/]\d{2}[\-\/]\d{2})/);
+    const date = dateMatch ? dateMatch[1] : '';
+
+    // Extract sport (if mentioned)
+    const sportMatch = text.match(/(?:sport|discipline)[:\s]*([A-Za-z]+)/i);
+    const sport = sportMatch ? sportMatch[1] : null;
+
+    // Find PDF link
+    const pdfHref = $el.find('a[href$=".pdf"]').attr('href') || '';
+    const pdfUrl = pdfHref.startsWith('http') ? pdfHref : 
+                   pdfHref ? `https://www.tas-cas.org${pdfHref}` : 
+                   generatePdfUrl(normalizedCaseNumber);
+
+    // Find source link
+    const sourceHref = $el.find('a').first().attr('href') || '';
+    const sourceUrl = sourceHref.startsWith('http') ? sourceHref : 
+                      sourceHref ? `https://www.tas-cas.org${sourceHref}` : 
+                      `https://jurisprudence.tas-cas.org/`;
+
+    return {
+      case_number: caseNumber,
+      case_number_normalized: normalizedCaseNumber,
+      title: cleanText(title),
+      date,
+      sport,
+      pdf_url: pdfUrl,
+      source_url: sourceUrl
+    };
+  } catch (error) {
+    console.error('Error parsing recent decision:', error);
+    return null;
+  }
+}
 
 /**
  * Get recent CAS decisions
- * Uses the main search endpoint with no query to get results sorted by date
+ * Uses simpler HTML page that doesn't require JavaScript
  */
 export async function getRecentDecisions(limit: number = 10): Promise<CasRecentOutput> {
+  // Check cache first (5 min TTL)
+  const cacheKey = `recent:${limit}`;
+  const cached = recentCache.get(cacheKey);
+  if (cached) {
+    return cached as CasRecentOutput;
+  }
+
   // Wait for rate limiter
-  await getRateLimiter().waitForSlot();
+  await tasCasRateLimiter.waitForSlot();
 
-  return withPage(async (page: Page) => {
-    // Navigate to search endpoint - results are sorted by date by default
-    await page.goto(CAS_CONSTANTS.RECENT_URL, {
-      waitUntil: 'networkidle',
-      timeout: CAS_CONSTANTS.PAGE_TIMEOUT_MS
-    });
-
-    // Wait for table to load
-    await page.waitForSelector('table tbody tr', { timeout: 15000 });
-
-    // Parse HTML
-    const html = await page.content();
-    const decisions = parseRecentDecisions(html, limit);
-
-    return {
-      decisions,
-      last_updated: new Date().toISOString(),
-      source: CAS_CONSTANTS.RECENT_URL
-    };
-  });
-}
-
-/**
- * Parse recent decisions from HTML table
- * Table columns: Lang(1), Year(2), Proc.(3), Case#(4), Appellant(5), Respondent(6), Sport(7), Matter(8), Date(9), Outcome(10)
- * Case number is constructed from Year + Proc + Seq number
- */
-function parseRecentDecisions(html: string, limit: number): RecentDecision[] {
-  const $ = cheerio.load(html);
-  const decisions: RecentDecision[] = [];
-
-  const rows = $(SELECTORS.resultRow).toArray();
-
-  for (const element of rows) {
-    if (decisions.length >= limit) break;
-
-    const $row = $(element);
-
-    // Extract data from table cells - case number is split across 3 columns
-    const year = cleanText($row.find(SELECTORS.year).text());
-    const procedureType = cleanText($row.find(SELECTORS.procedureType).text());
-    const caseNumberSeq = cleanText($row.find(SELECTORS.caseNumberSeq).text());
-
-    if (!year || !procedureType || !caseNumberSeq) continue;
-
-    // Construct full CAS case number: "CAS 2023/A/10168"
-    const caseNumberText = `CAS ${year}/${procedureType}/${caseNumberSeq}`;
-
-    const appellant = cleanText($row.find(SELECTORS.appellant).text());
-    const respondent = cleanText($row.find(SELECTORS.respondent).text());
-    const sport = cleanText($row.find(SELECTORS.sport).text());
-    const date = cleanText($row.find(SELECTORS.date).text());
-
-    // Build title from parties (Appellant v. Respondent)
-    const title = appellant && respondent
-      ? `${appellant} v. ${respondent}`
-      : caseNumberText;
-
-    // Generate URL from case number pattern
-    // URL format: https://jurisprudence.tas-cas.org/decision/2023-A-10168
-    const urlPath = `${year}-${procedureType}-${caseNumberSeq}`;
-    const absoluteUrl = `${CAS_CONSTANTS.BASE_URL}/decision/${urlPath}`;
-
-    // PDF URL - generate from case number
-    const pdfUrl = generatePdfUrl(caseNumberText);
-
-    try {
-      const caseNumber = normalizeCaseNumber(caseNumberText);
-
-      decisions.push({
-        case_number: caseNumber,
-        title: title || caseNumber,
-        date: date || new Date().toISOString().split('T')[0],
-        sport: sport || extractSportFromTitle(title),
-        procedure_type: procedureType || extractProcedureFromCaseNumber(caseNumber),
-        url: absoluteUrl,
-        pdf_url: pdfUrl
-      });
-    } catch {
-      // Skip invalid case numbers
-    }
-  }
-
-  return decisions;
-}
-
-/**
- * Extract sport from decision title
- */
-function extractSportFromTitle(title: string): string | undefined {
-  const sports = [
-    'Football', 'Soccer', 'Athletics', 'Cycling', 'Tennis',
-    'Swimming', 'Basketball', 'Ice Hockey', 'Handball', 'Volleyball',
-    'Skiing', 'Gymnastics', 'Rowing', 'Boxing', 'Wrestling',
-    'Judo', 'Equestrian', 'Sailing', 'Fencing'
-  ];
-
-  const lowerTitle = title.toLowerCase();
-
-  for (const sport of sports) {
-    if (lowerTitle.includes(sport.toLowerCase())) {
-      return sport;
-    }
-  }
-
-  return undefined;
-}
-
-/**
- * Extract procedure type from case number
- */
-function extractProcedureFromCaseNumber(caseNumber: string): string | undefined {
-  const match = caseNumber.match(/\/([AO]|AD|G|M)\//);
-
-  if (!match) return undefined;
-
-  const typeMap: Record<string, string> = {
-    'A': 'Appeal',
-    'O': 'Ordinary',
-    'AD': 'Anti-Doping',
-    'G': 'Advisory',
-    'M': 'Mediation'
-  };
-
-  return typeMap[match[1]];
-}
-
-/**
- * Check if recent decisions are accessible via main search endpoint
- */
-export async function checkRecentDecisionsAvailability(): Promise<boolean> {
   try {
-    await getRateLimiter().waitForSlot();
+    const html = await fetchText(RECENT_URL);
+    const $ = cheerio.load(html);
 
-    return withPage(async (page: Page) => {
-      const response = await page.goto(CAS_CONSTANTS.RECENT_URL, {
-        waitUntil: 'domcontentloaded',
-        timeout: 15000
-      });
+    const decisions: CasRecentDecision[] = [];
 
-      if (response?.status() !== 200) return false;
+    // Try various selectors for recent decisions
+    const selectors = [
+      '.decision-item',
+      '.recent-decision',
+      'article',
+      'li',
+      '.content a',
+      'table tr'
+    ];
 
-      // Check if table is present
-      try {
-        await page.waitForSelector('table tbody tr', { timeout: 5000 });
-        return true;
-      } catch {
-        return false;
+    for (const selector of selectors) {
+      const elements = $(selector);
+      if (elements.length > 0) {
+        elements.each((_, el) => {
+          if (decisions.length < limit) {
+            const parsed = parseRecentDecision($, el);
+            if (parsed && !decisions.find(d => d.case_number_normalized === parsed.case_number_normalized)) {
+              decisions.push(parsed);
+            }
+          }
+        });
+        if (decisions.length >= limit) break;
       }
+    }
+
+    const result: CasRecentOutput = {
+      decisions: decisions.slice(0, limit),
+      retrieved_at: new Date().toISOString(),
+      source: RECENT_URL
+    };
+
+    // Cache the result
+    recentCache.set(cacheKey, result);
+    return result;
+  } finally {
+    tasCasRateLimiter.releaseSlot();
+  }
+}
+
+/**
+ * Alternative: Scrape recent decisions using Playwright for JavaScript-rendered content
+ * Use this if the simple fetch doesn't return results
+ */
+export async function getRecentDecisionsWithPlaywright(limit: number = 10): Promise<CasRecentOutput> {
+  // Import dynamically to avoid circular dependencies
+  const { withPage, navigateAndWait } = await import('./playwright-client.js');
+
+  // Check cache first
+  const cacheKey = `recent:pw:${limit}`;
+  const cached = recentCache.get(cacheKey);
+  if (cached) {
+    return cached as CasRecentOutput;
+  }
+
+  // Wait for rate limiter
+  await tasCasRateLimiter.waitForSlot();
+
+  try {
+    const result = await withPage(async (page) => {
+      await navigateAndWait(page, RECENT_URL, 'networkidle');
+      const html = await page.content();
+      const $ = cheerio.load(html);
+
+      const decisions: CasRecentDecision[] = [];
+
+      // Parse with same selectors
+      const selectors = ['.decision-item', '.recent-decision', 'article', 'li', '.content a'];
+      
+      for (const selector of selectors) {
+        $(selector).each((_, el) => {
+          if (decisions.length < limit) {
+            const parsed = parseRecentDecision($, el);
+            if (parsed && !decisions.find(d => d.case_number_normalized === parsed.case_number_normalized)) {
+              decisions.push(parsed);
+            }
+          }
+        });
+        if (decisions.length >= limit) break;
+      }
+
+      return {
+        decisions: decisions.slice(0, limit),
+        retrieved_at: new Date().toISOString(),
+        source: RECENT_URL
+      };
     });
-  } catch {
-    return false;
+
+    recentCache.set(cacheKey, result);
+    return result;
+  } finally {
+    tasCasRateLimiter.releaseSlot();
   }
 }

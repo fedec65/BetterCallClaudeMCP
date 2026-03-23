@@ -1,94 +1,115 @@
 /**
  * TAS/CAS Jurisprudence MCP Server - Utility Functions
- * Case number parsing, delays, and helper functions
+ * Helpers for case number parsing, normalization, and general utilities
  */
 
-import { CAS_CONSTANTS, ParsedCaseNumber } from './types.js';
+import type { ParsedCaseNumber } from './types.js';
 
 /**
- * Normalize case number to standard format
- * Input formats: "CAS 2023/A/9876", "2023/A/9876", "CAS 2023 A 9876", "2023/ADD/62"
- * Output format: "CAS 2023/A/9876"
- * Note: ADD (Anti-Doping) is normalized to AD
+ * Normalize a CAS case number to standard format
+ * Input formats accepted:
+ * - "CAS 2023/A/9876"
+ * - "2023/A/9876"
+ * - "TAS 2023/A/9876"
+ * - "cas 2023 a 9876"
+ *
+ * Output format: "CAS YYYY/T/NNNN"
  */
 export function normalizeCaseNumber(input: string): string {
   if (!input || typeof input !== 'string') {
-    throw new Error('Case number is required');
+    throw new Error('Invalid case number: input must be a non-empty string');
   }
 
-  // Remove extra whitespace
-  let normalized = input.trim().toUpperCase();
+  // Clean and uppercase
+  let cleaned = input.trim().toUpperCase();
 
-  // Remove "CAS" prefix if present (will be added back)
-  normalized = normalized.replace(/^CAS\s*/i, '');
+  // Remove CAS/TAS prefix if present
+  cleaned = cleaned.replace(/^(CAS|TAS)\s*/i, '');
 
-  // Replace various separators with standard format
-  // "2023/A/9876" or "2023 A 9876" or "2023-A-9876"
-  // Accept: A (Appeal), O (Ordinary), AD/ADD (Anti-Doping), G (Advisory), M (Mediation)
-  const match = normalized.match(/(\d{4})\s*[-\/\s]?\s*([AO]|AD|ADD|G|M)\s*[-\/\s]?\s*(\d+)/i);
+  // Normalize separators - handle various formats like "2023/A/9876", "2023 A 9876", "2023-A-9876"
+  cleaned = cleaned.replace(/[\s\-_]/g, '/');
+
+  // Extract components using regex
+  // Format: YYYY/T/NNNN or YYYY/TT/NNNN (where T is type, TT can be AD for Anti-Doping)
+  const match = cleaned.match(/^(\d{4})\/?([AO]|AD|ADV)\/?(\d+)$/i);
 
   if (!match) {
-    throw new Error(`Invalid case number format: ${input}. Expected format: "CAS 2023/A/9876" or "2023/A/9876"`);
+    throw new Error(`Invalid case number format: "${input}". Expected format: YYYY/T/NNNN (e.g., 2023/A/9876)`);
   }
 
   const [, year, type, number] = match;
-  // Normalize ADD to AD for consistency
-  const normalizedType = type.toUpperCase() === 'ADD' ? 'AD' : type.toUpperCase();
-  return `CAS ${year}/${normalizedType}/${number}`;
+
+  // Validate type
+  const validTypes = ['A', 'O', 'AD', 'ADV'] as const;
+  const normalizedType = type.toUpperCase();
+
+  if (!validTypes.includes(normalizedType as typeof validTypes[number])) {
+    throw new Error(`Invalid case type: "${type}". Must be A (Appeal), O (Ordinary), AD (Anti-Doping), or ADV (Advisory)`);
+  }
+
+  // Pad number to at least 4 digits
+  const paddedNumber = number.padStart(4, '0');
+
+  return `CAS ${year}/${normalizedType}/${paddedNumber}`;
 }
 
 /**
- * Parse case number into components
- * "CAS 2023/A/9876" → { year: 2023, type: "A", number: 9876, full_number: "CAS 2023/A/9876" }
+ * Parse a CAS case number into its components
  */
 export function parseCaseNumber(caseNumber: string): ParsedCaseNumber {
   const normalized = normalizeCaseNumber(caseNumber);
 
-  const match = normalized.match(/CAS (\d{4})\/([AO]|AD|G|M)\/(\d+)/i);
+  // Extract from normalized format "CAS YYYY/T/NNNN"
+  const match = normalized.match(/^CAS (\d{4})\/([AO]|AD|ADV)\/(\d+)$/);
 
   if (!match) {
-    throw new Error(`Failed to parse case number: ${caseNumber}`);
+    throw new Error(`Failed to parse normalized case number: ${normalized}`);
   }
 
+  const [, yearStr, typeStr, numberStr] = match;
+
+  const typeMap: Record<string, 'A' | 'O' | 'AD' | 'ADV'> = {
+    'A': 'A',
+    'O': 'O',
+    'AD': 'AD',
+    'ADV': 'ADV'
+  };
+
   return {
-    year: parseInt(match[1], 10),
-    type: match[2].toUpperCase() as 'A' | 'O' | 'AD' | 'G' | 'M',
-    number: parseInt(match[3], 10),
-    full_number: normalized
+    year: parseInt(yearStr, 10),
+    type: typeMap[typeStr],
+    number: parseInt(numberStr, 10),
+    original: caseNumber,
+    normalized
   };
 }
 
 /**
  * Generate PDF URL from case number
- * Format: https://www.tas-cas.org/files/decision/CAS-{year}-{type}-{number}.pdf
+ * Format: https://www.tas-cas.org/files/decision/CAS-YYYY-T-NNNN.pdf
  */
 export function generatePdfUrl(caseNumber: string): string {
   const parsed = parseCaseNumber(caseNumber);
-  return `${CAS_CONSTANTS.PDF_BASE_URL}/CAS-${parsed.year}-${parsed.type}-${parsed.number}.pdf`;
+  const paddedNumber = String(parsed.number).padStart(4, '0');
+  return `https://www.tas-cas.org/files/decision/CAS-${parsed.year}-${parsed.type}-${paddedNumber}.pdf`;
 }
 
 /**
  * Extract PDF URL from HTML content
  */
 export function extractPdfUrl(html: string): string | null {
-  // Look for PDF links in various formats
+  // Look for PDF links in the HTML
   const patterns = [
-    /href="([^"]+\.pdf)"/gi,
-    /src="([^"]+\.pdf)"/gi,
-    /location\.href=['"]([^'"]+\.pdf)['"]/gi
+    /href="([^"]+\.pdf)"/i,
+    /href='([^']+\.pdf)'/i,
+    /"(https?:\/\/[^"]+\.pdf)"/i,
+    /'(https?:\/\/[^']+\.pdf)'/i
   ];
 
   for (const pattern of patterns) {
-    const match = pattern.exec(html);
+    const match = html.match(pattern);
     if (match && match[1]) {
-      // Convert relative URL to absolute
-      let url = match[1];
-      if (url.startsWith('/')) {
-        url = `https://www.tas-cas.org${url}`;
-      } else if (!url.startsWith('http')) {
-        url = `https://www.tas-cas.org/${url}`;
-      }
-      return url;
+      return match[1];
     }
   }
 
@@ -96,158 +117,120 @@ export function extractPdfUrl(html: string): string | null {
 }
 
 /**
- * Promise-based delay
+ * Delay execution for specified milliseconds
  */
 export function delay(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 /**
- * Generate cache key from prefix and parameters
+ * Generate a cache key from prefix and parameters
  */
 export function generateCacheKey(prefix: string, params: Record<string, unknown>): string {
   const sortedParams = Object.keys(params)
     .sort()
     .map(key => `${key}=${JSON.stringify(params[key])}`)
     .join('&');
-
   return `${prefix}:${sortedParams}`;
 }
 
 /**
- * Check if a URL is a valid CAS URL
+ * Safely truncate text to a maximum length
  */
-export function isValidCasUrl(url: string): boolean {
+export function truncateText(text: string, maxLength: number): string {
+  if (!text || text.length <= maxLength) {
+    return text;
+  }
+  return text.substring(0, maxLength - 3) + '...';
+}
+
+/**
+ * Clean and normalize text content (remove extra whitespace, etc.)
+ */
+export function cleanText(text: string): string {
+  if (!text) return '';
+  return text
+    .replace(/\s+/g, ' ')
+    .replace(/\n\s*\n/g, '\n\n')
+    .trim();
+}
+
+/**
+ * Extract year from date string
+ */
+export function extractYearFromDate(dateStr: string): number | null {
+  if (!dateStr) return null;
+
+  // Try to extract 4-digit year
+  const match = dateStr.match(/\b(19|20)\d{2}\b/);
+  return match ? parseInt(match[0], 10) : null;
+}
+
+/**
+ * Format date to ISO format (YYYY-MM-DD)
+ */
+export function formatDate(dateStr: string): string {
+  if (!dateStr) return '';
+
+  // Handle various date formats
+  const datePatterns = [
+    /(\d{4})-(\d{2})-(\d{2})/,  // YYYY-MM-DD
+    /(\d{2})\/(\d{2})\/(\d{4})/,  // DD/MM/YYYY
+    /(\d{1,2})\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+(\d{4})/i  // DD Month YYYY
+  ];
+
+  for (const pattern of datePatterns) {
+    const match = dateStr.match(pattern);
+    if (match) {
+      try {
+        const date = new Date(dateStr);
+        if (!isNaN(date.getTime())) {
+          return date.toISOString().split('T')[0];
+        }
+      } catch {
+        // Continue to next pattern
+      }
+    }
+  }
+
+  // Return original if no pattern matched
+  return dateStr;
+}
+
+/**
+ * Check if a URL is valid
+ */
+export function isValidUrl(url: string): boolean {
   try {
-    const parsed = new URL(url);
-    return (
-      parsed.hostname.endsWith('tas-cas.org') ||
-      parsed.hostname === 'jurisprudence.tas-cas.org'
-    );
+    new URL(url);
+    return true;
   } catch {
     return false;
   }
 }
 
 /**
- * Clean and normalize text content
- */
-export function cleanText(text: string): string {
-  return text
-    .replace(/\s+/g, ' ')
-    .replace(/[\r\n]+/g, '\n')
-    .trim();
-}
-
-/**
- * Extract year from date string (various formats)
- */
-export function extractYear(dateStr: string): number | null {
-  const match = dateStr.match(/\b(\d{4})\b/);
-  return match ? parseInt(match[1], 10) : null;
-}
-
-/**
- * Map procedure type code to full name
- */
-export function getProcedureTypeName(code: string): string {
-  const mapping: Record<string, string> = {
-    'A': 'Appeal',
-    'O': 'Ordinary',
-    'AD': 'Anti-Doping',
-    'G': 'Advisory',
-    'M': 'Mediation'
-  };
-  return mapping[code.toUpperCase()] || code;
-}
-
-/**
- * Map procedure type name to code
- */
-export function getProcedureTypeCode(name: string): string {
-  const mapping: Record<string, string> = {
-    'appeal': 'A',
-    'ordinary': 'O',
-    'anti-doping': 'AD',
-    'antidoping': 'AD',
-    'advisory': 'G',
-    'mediation': 'M'
-  };
-  return mapping[name.toLowerCase()] || name;
-}
-
-/**
- * Sanitize search query for URL
- */
-export function sanitizeQuery(query: string): string {
-  return query
-    .trim()
-    .replace(/[<>]/g, '')
-    .substring(0, 200); // Limit query length
-}
-
-/**
- * Retry with exponential backoff
+ * Retry a function with exponential backoff
  */
 export async function retryWithBackoff<T>(
   fn: () => Promise<T>,
   maxRetries: number = 3,
-  initialDelayMs: number = 1000
+  baseDelayMs: number = 1000
 ): Promise<T> {
   let lastError: Error | undefined;
 
-  for (let i = 0; i < maxRetries; i++) {
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
     try {
       return await fn();
     } catch (error) {
-      lastError = error as Error;
+      lastError = error instanceof Error ? error : new Error(String(error));
 
-      if (i < maxRetries - 1) {
-        const backoffMs = initialDelayMs * Math.pow(2, i);
-        await delay(backoffMs);
+      if (attempt < maxRetries - 1) {
+        const delayMs = baseDelayMs * Math.pow(2, attempt);
+        await delay(delayMs);
       }
     }
   }
 
-  throw lastError;
-}
-
-/**
- * Format date for display
- */
-export function formatDate(date: Date | string): string {
-  const d = typeof date === 'string' ? new Date(date) : date;
-  return d.toLocaleDateString('en-GB', {
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric'
-  });
-}
-
-/**
- * Parse CAS date format (e.g., "15 January 2023")
- */
-export function parseCasDate(dateStr: string): Date | null {
-  try {
-    // Try parsing various date formats
-    const formats = [
-      /(\d{1,2})\s+(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{4})/i,
-      /(\d{4})-(\d{2})-(\d{2})/,
-      /(\d{2})\.(\d{2})\.(\d{4})/
-    ];
-
-    for (const pattern of formats) {
-      const match = dateStr.match(pattern);
-      if (match) {
-        const date = new Date(dateStr);
-        if (!isNaN(date.getTime())) {
-          return date;
-        }
-      }
-    }
-
-    return null;
-  } catch {
-    return null;
-  }
+  throw lastError || new Error('Retry failed');
 }

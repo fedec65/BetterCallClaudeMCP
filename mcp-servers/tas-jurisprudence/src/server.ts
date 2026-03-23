@@ -1,110 +1,108 @@
 /**
  * TAS/CAS Jurisprudence MCP Server - Server Setup
- * MCP server configuration and tool registration
+ * MCP server with tool registration and handlers
  */
 
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import {
   ListToolsRequestSchema,
   CallToolRequestSchema,
-  type Tool
+  ErrorCode,
+  McpError,
+  type Tool,
 } from '@modelcontextprotocol/sdk/types.js';
-import {
-  CAS_SEARCH_TOOL,
-  casSearch
-} from './tools/cas-search.js';
-import {
-  CAS_GET_AWARD_TOOL,
-  casGetAward
-} from './tools/cas-get-award.js';
-import {
-  CAS_RECENT_TOOL,
-  casRecent
-} from './tools/cas-recent.js';
-import {
-  CAS_BY_SPORT_TOOL,
-  casBySport
-} from './tools/cas-by-sport.js';
+import { TOOL_DEFINITIONS } from './types.js';
+import { casSearch } from './tools/cas-search.js';
+import { casGetAward } from './tools/cas-get-award.js';
+import { casRecent } from './tools/cas-recent.js';
+import { casBySport } from './tools/cas-by-sport.js';
 
 /**
- * All available tools
- */
-const TOOLS: Tool[] = [
-  CAS_SEARCH_TOOL,
-  CAS_GET_AWARD_TOOL,
-  CAS_RECENT_TOOL,
-  CAS_BY_SPORT_TOOL
-];
-
-/**
- * Tool handlers mapping
- */
-const TOOL_HANDLERS: Record<string, (input: unknown) => Promise<unknown>> = {
-  cas_search: casSearch,
-  cas_get_award: casGetAward,
-  cas_recent: casRecent,
-  cas_by_sport: casBySport
-};
-
-/**
- * Create and configure MCP server
+ * Create and configure the MCP server
  */
 export function createMcpServer(): Server {
   const server = new Server(
     {
       name: 'tas-jurisprudence',
-      version: '1.0.0'
+      version: '1.0.0',
     },
     {
       capabilities: {
-        tools: {}
-      }
+        tools: {},
+      },
     }
   );
 
-  // Register list tools handler
+  /**
+   * Handler: List available tools
+   */
   server.setRequestHandler(ListToolsRequestSchema, async () => {
-    return { tools: TOOLS };
+    return {
+      tools: TOOL_DEFINITIONS.map(def => ({
+        name: def.name,
+        description: def.description,
+        inputSchema: def.inputSchema,
+        annotations: def.annotations
+      })) as Tool[]
+    };
   });
 
-  // Register call tool handler
+  /**
+   * Handler: Execute tool calls
+   */
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: args } = request.params;
 
-    const handler = TOOL_HANDLERS[name];
-    if (!handler) {
-      throw new Error(`Unknown tool: ${name}`);
-    }
-
     try {
-      const result = await handler(args);
+      let result: unknown;
 
-      // Format result as MCP tool response
+      switch (name) {
+        case 'cas_search':
+          result = await casSearch(args);
+          break;
+
+        case 'cas_get_award':
+          result = await casGetAward(args);
+          break;
+
+        case 'cas_recent':
+          result = await casRecent(args);
+          break;
+
+        case 'cas_by_sport':
+          result = await casBySport(args);
+          break;
+
+        default:
+          throw new McpError(
+            ErrorCode.MethodNotFound,
+            `Unknown tool: ${name}`
+          );
+      }
+
       return {
         content: [
           {
             type: 'text',
-            text: JSON.stringify(result, null, 2)
-          }
-        ]
+            text: JSON.stringify(result, null, 2),
+          },
+        ],
       };
     } catch (error) {
-      const errorMessage = error instanceof Error
-        ? error.message
-        : 'Unknown error occurred';
+      // Handle Zod validation errors
+      if (error instanceof Error && error.name === 'ZodError') {
+        throw new McpError(
+          ErrorCode.InvalidParams,
+          `Invalid parameters: ${error.message}`
+        );
+      }
 
-      return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify({
-              error: true,
-              message: errorMessage
-            }, null, 2)
-          }
-        ],
-        isError: true
-      };
+      // Handle other errors
+      const message = error instanceof Error ? error.message : String(error);
+      throw new McpError(
+        ErrorCode.InternalError,
+        `Tool execution failed: ${message}`
+      );
     }
   });
 

@@ -1,397 +1,314 @@
 /**
  * TAS/CAS Jurisprudence MCP Server - Main Database Scraper
- * Scrapes JavaScript-rendered content from jurisprudence.tas-cas.org
+ * Scrapes the JavaScript-rendered jurisprudence.tas-cas.org database
  */
 
 import * as cheerio from 'cheerio';
-import { Page } from 'playwright';
-import {
+import type { AnyNode } from 'domhandler';
+import type {
   CasSearchInput,
   CasSearchOutput,
-  CasAwardOutput,
-  SearchResult,
-  CAS_CONSTANTS
+  CasSearchResult,
+  CasAwardDetails,
+  CasAwardOutput
 } from '../types.js';
-import { getRateLimiter } from '../infrastructure/rate-limiter.js';
-import { withPage } from './playwright-client.js';
-import { normalizeCaseNumber, generatePdfUrl, cleanText } from '../utils.js';
+import { normalizeCaseNumber, parseCaseNumber, generatePdfUrl, cleanText } from '../utils.js';
+import { searchCache, awardCache } from '../infrastructure/cache.js';
+import { jurisprudenceRateLimiter } from '../infrastructure/rate-limiter.js';
+import { navigateAndWait, withPage } from './playwright-client.js';
+
+const BASE_URL = 'https://jurisprudence.tas-cas.org';
 
 /**
- * CSS selectors for the CAS jurisprudence database
- * Based on actual site structure at jurisprudence.tas-cas.org
- * Table columns: Lang(1), Year(2), Proc.(3), Case#(4), Appellant(5), Respondent(6), Sport(7), Matter(8), Date(9), Outcome(10)
+ * Build search URL with query parameters
  */
-const SELECTORS = {
-  // Search form - Angular app structure
-  searchInput: '.search-bar input, app-search-bar input, input[placeholder*="Search"], input[placeholder*="Recherche"]',
-  searchButton: 'button[type="submit"], .btn-primary',
-  sportFilter: 'select[name="sport"], #sport-filter',
-  yearFromFilter: 'input[name="year_from"], #year-from',
-  yearToFilter: 'input[name="year_to"], #year-to',
-  procedureTypeFilter: 'select[name="procedure_type"], #procedure-type',
-  applyFiltersButton: '.filter-button, button:has-text("Apply")',
+function buildSearchUrl(input: CasSearchInput): string {
+  const params = new URLSearchParams();
+  params.set('q', input.query);
+  
+  if (input.sport) params.set('sport', input.sport);
+  if (input.year_from) params.set('yearFrom', String(input.year_from));
+  if (input.year_to) params.set('yearTo', String(input.year_to));
+  if (input.procedure_type) params.set('type', input.procedure_type);
+  params.set('page', String(input.page));
+  params.set('size', String(input.page_size));
 
-  // Results - Table structure
-  // Columns: Lang(1), Year(2), Proc.(3), Case#(4), Appellant(5), Respondent(6), Sport(7), Matter(8), Date(9), Outcome(10)
-  // NOTE: Case number is split across columns 2,3,4 - need to combine Year/Proc/Number
-  resultsContainer: 'table, tbody, .results-table',
-  resultRow: 'tbody tr',
-  year: 'td:nth-child(2)',
-  procedureType: 'td:nth-child(3)',
-  caseNumberSeq: 'td:nth-child(4)', // Just the sequential number
-  appellant: 'td:nth-child(5)',
-  respondent: 'td:nth-child(6)',
-  sport: 'td:nth-child(7)',
-  matter: 'td:nth-child(8)',
-  date: 'td:nth-child(9)',
-  outcome: 'td:nth-child(10)',
-
-  // Pagination
-  pagination: '.pagination, .pager',
-  nextPage: '.next, a[rel="next"]',
-  pageInfo: '.page-info',
-
-  // Award details
-  awardContainer: '.award-container, .decision-details',
-  awardTitle: '.award-title, h1, .case-title',
-  awardMetadata: '.metadata, .case-info',
-  arbitrators: '.arbitrators, .panel-members',
-  keywords: '.keywords, .tags',
-  operativePart: '.operative-part, .dispositive, .operative',
-  fullText: '.full-text, .award-text, .decision-body'
-};
-
-/**
- * Search CAS decisions
- * Uses URL parameters for the Angular app at jurisprudence.tas-cas.org
- */
-export async function searchCasDecisions(
-  input: CasSearchInput
-): Promise<CasSearchOutput> {
-  await getRateLimiter().waitForSlot();
-
-  return withPage(async (page: Page) => {
-    // Build search URL with query parameters
-    const params = new URLSearchParams();
-    params.set('details', '-1'); // Detailed view
-    if (input.query) {
-      params.set('text', input.query);
-    }
-
-    // Navigate directly to search URL
-    const searchUrl = `${CAS_CONSTANTS.BASE_URL}/search?${params.toString()}`;
-
-    await page.goto(searchUrl, {
-      waitUntil: 'networkidle',
-      timeout: CAS_CONSTANTS.PAGE_TIMEOUT_MS
-    });
-
-    // Wait for table to load
-    await page.waitForSelector('table tbody tr', { timeout: 15000 });
-
-    // Apply filters if needed (these require UI interaction)
-    if (input.sport || input.year_from || input.year_to || input.procedure_type) {
-      // For now, we'll filter results client-side after fetching
-      // The site uses Angular reactive forms which are complex to interact with
-    }
-
-    // Handle pagination
-    if (input.page > 1) {
-      // Calculate offset and navigate
-      const offset = (input.page - 1) * input.page_size;
-      params.set('offset', offset.toString());
-      const pagedUrl = `${CAS_CONSTANTS.BASE_URL}/search?${params.toString()}`;
-
-      await getRateLimiter().waitForSlot();
-      await page.goto(pagedUrl, {
-        waitUntil: 'networkidle',
-        timeout: CAS_CONSTANTS.PAGE_TIMEOUT_MS
-      });
-      await page.waitForSelector('table tbody tr', { timeout: 10000 });
-    }
-
-    const html = await page.content();
-    const allResults = parseSearchResults(html, input);
-    const totalResults = await getTotalResults(page);
-    const totalPages = Math.ceil(totalResults / input.page_size);
-
-    return {
-      results: allResults.slice(0, input.page_size),
-      total_results: totalResults,
-      page: input.page,
-      page_size: input.page_size,
-      total_pages: totalPages,
-      has_more: input.page < totalPages
-    };
-  });
+  return `${BASE_URL}/search?${params.toString()}`;
 }
 
 /**
- * Get specific award details
+ * Parse a search result from HTML
+ */
+function parseSearchResult($: cheerio.CheerioAPI, element: AnyNode): CasSearchResult | null {
+  const $el = $(element);
+  
+  try {
+    // Extract case number
+    const caseNumberText = $el.find('.case-number, .caseNumber, [class*="case"]').first().text().trim();
+    if (!caseNumberText) return null;
+
+    const caseNumberNormalized = normalizeCaseNumber(caseNumberText);
+
+    // Extract title
+    const title = $el.find('.title, h3, h4, [class*="title"]').first().text().trim();
+
+    // Extract sport
+    const sport = $el.find('.sport, [class*="sport"]').first().text().trim() || null;
+
+    // Extract procedure type
+    const typeText = $el.find('.type, .procedure-type, [class*="type"]').first().text().trim();
+    const procedureType = mapProcedureType(typeText);
+
+    // Extract date
+    const date = $el.find('.date, [class*="date"]').first().text().trim();
+
+    // Extract parties
+    const appellant = $el.find('.appellant, [class*="appellant"]').first().text().trim() || null;
+    const respondent = $el.find('.respondent, [class*="respondent"]').first().text().trim() || null;
+
+    // Extract URL
+    const link = $el.find('a[href*="/decision/"], a[href*="/award/"]').first();
+    const href = link.attr('href') || '';
+    const url = href.startsWith('http') ? href : `${BASE_URL}${href}`;
+
+    // Extract snippet
+    const snippet = $el.find('.snippet, .summary, p').first().text().trim() || null;
+
+    // Generate PDF URL
+    const pdfUrl = generatePdfUrl(caseNumberNormalized);
+
+    return {
+      case_number: caseNumberText,
+      case_number_normalized: caseNumberNormalized,
+      title: title || `CAS Decision ${caseNumberNormalized}`,
+      sport,
+      procedure_type: procedureType,
+      date,
+      parties: { appellant, respondent },
+      url,
+      pdf_url: pdfUrl,
+      snippet: snippet ? cleanText(snippet).substring(0, 200) : null
+    };
+  } catch (error) {
+    console.error('Error parsing search result:', error);
+    return null;
+  }
+}
+
+/**
+ * Map procedure type text to enum
+ */
+function mapProcedureType(text: string): CasSearchResult['procedure_type'] {
+  const normalized = text.toLowerCase();
+  if (normalized.includes('appeal') || normalized.includes('a/')) return 'Appeal';
+  if (normalized.includes('ordinary') || normalized.includes('o/')) return 'Ordinary';
+  if (normalized.includes('anti-doping') || normalized.includes('ad/')) return 'Anti-Doping';
+  if (normalized.includes('advisory') || normalized.includes('adv/')) return 'Advisory';
+  return 'Appeal'; // Default
+}
+
+/**
+ * Search CAS decisions using Playwright for JavaScript rendering
+ */
+export async function searchCasDecisions(input: CasSearchInput): Promise<CasSearchOutput> {
+  // Check cache first
+  const cacheKey = `search:${JSON.stringify(input)}`;
+  const cached = searchCache.get(cacheKey);
+  if (cached) {
+    return cached as CasSearchOutput;
+  }
+
+  // Wait for rate limiter
+  await jurisprudenceRateLimiter.waitForSlot();
+
+  try {
+    const result = await withPage(async (page) => {
+      const url = buildSearchUrl(input);
+      await navigateAndWait(page, url, 'networkidle');
+
+      // Get the rendered HTML
+      const html = await page.content();
+      const $ = cheerio.load(html);
+
+      // Parse results - try multiple selectors for robustness
+      const results: CasSearchResult[] = [];
+      
+      // Try various result container selectors
+      const selectors = [
+        '.result-item',
+        '.search-result',
+        '[class*="result"]',
+        '.decision-item',
+        'article',
+        'li[class*="case"]'
+      ];
+
+      for (const selector of selectors) {
+        const elements = $(selector);
+        if (elements.length > 0) {
+          elements.each((_, el) => {
+            const parsed = parseSearchResult($, el);
+            if (parsed) {
+              results.push(parsed);
+            }
+          });
+          if (results.length > 0) break;
+        }
+      }
+
+      // Parse total count
+      let total = results.length;
+      const totalText = $('.total, .count, [class*="total"]').first().text();
+      const totalMatch = totalText.match(/(\d+)/);
+      if (totalMatch) {
+        total = parseInt(totalMatch[1], 10);
+      }
+
+      return {
+        results,
+        total,
+        page: input.page,
+        page_size: input.page_size,
+        has_more: results.length === input.page_size && (input.page * input.page_size) < total,
+        query_used: input.query,
+        filters_applied: {
+          sport: input.sport,
+          year_from: input.year_from,
+          year_to: input.year_to,
+          procedure_type: input.procedure_type
+        }
+      };
+    });
+
+    // Cache the result
+    searchCache.set(cacheKey, result);
+    return result;
+  } finally {
+    jurisprudenceRateLimiter.releaseSlot();
+  }
+}
+
+/**
+ * Get detailed award information
  */
 export async function getAwardDetails(
-  caseNumber: string,
+  caseNumber?: string,
+  url?: string,
   includeFullText: boolean = false
 ): Promise<CasAwardOutput> {
-  const normalizedNumber = normalizeCaseNumber(caseNumber);
-
-  await getRateLimiter().waitForSlot();
-
-  return withPage(async (page: Page) => {
-    const urlPath = normalizedNumber.replace('CAS ', '').replace(/\//g, '-');
-    const awardUrl = `${CAS_CONSTANTS.BASE_URL}/decision/${urlPath}`;
-
-    await page.goto(awardUrl, {
-      waitUntil: 'networkidle',
-      timeout: CAS_CONSTANTS.PAGE_TIMEOUT_MS
-    });
-
-    const html = await page.content();
-    const $ = cheerio.load(html);
-    const metadata = extractAwardMetadata($, normalizedNumber, awardUrl);
-
-    let fullText: string | undefined;
-    let extractionStatus: 'success' | 'partial' | 'failed' | 'not_requested' = 'not_requested';
-
-    if (includeFullText) {
-      try {
-        const textContent = $(SELECTORS.fullText).text();
-        if (textContent && textContent.length > 100) {
-          fullText = cleanText(textContent);
-          extractionStatus = 'success';
-        } else {
-          extractionStatus = 'partial';
-        }
-      } catch {
-        extractionStatus = 'failed';
-      }
+  // Normalize case number
+  let normalizedCaseNumber: string | undefined;
+  if (caseNumber) {
+    try {
+      normalizedCaseNumber = normalizeCaseNumber(caseNumber);
+    } catch {
+      return { found: false, award: null, error: 'Invalid case number format' };
     }
-
-    return {
-      ...metadata,
-      full_text: fullText,
-      extraction_status: extractionStatus
-    };
-  });
-}
-
-/**
- * Parse search results from HTML table
- * Table columns: Lang(1), Year(2), Proc.(3), Case#(4), Appellant(5), Respondent(6), Sport(7), Matter(8), Date(9), Outcome(10)
- * Case number is constructed from Year + Proc + Seq number
- */
-function parseSearchResults(html: string, input: CasSearchInput): SearchResult[] {
-  const $ = cheerio.load(html);
-  const results: SearchResult[] = [];
-
-  $(SELECTORS.resultRow).each((_, element) => {
-    const $row = $(element);
-
-    // Extract data from table cells - case number is split across 3 columns
-    const year = cleanText($row.find(SELECTORS.year).text());
-    const procedureType = cleanText($row.find(SELECTORS.procedureType).text());
-    const caseNumberSeq = cleanText($row.find(SELECTORS.caseNumberSeq).text());
-
-    if (!year || !procedureType || !caseNumberSeq) return;
-
-    // Construct full CAS case number: "CAS 2023/A/10168"
-    const caseNumberText = `CAS ${year}/${procedureType}/${caseNumberSeq}`;
-
-    const appellant = cleanText($row.find(SELECTORS.appellant).text());
-    const respondent = cleanText($row.find(SELECTORS.respondent).text());
-    const sport = cleanText($row.find(SELECTORS.sport).text());
-    const date = cleanText($row.find(SELECTORS.date).text());
-
-    // Build title from parties (Appellant v. Respondent)
-    const title = appellant && respondent
-      ? `${appellant} v. ${respondent}`
-      : caseNumberText;
-
-    // Generate URL from case number pattern
-    // URL format: https://jurisprudence.tas-cas.org/decision/2023-A-10168
-    const urlPath = `${year}-${procedureType}-${caseNumberSeq}`;
-    const absoluteUrl = `${CAS_CONSTANTS.BASE_URL}/decision/${urlPath}`;
-
-    // PDF URL - generate from case number
-    const pdfUrl = generatePdfUrl(caseNumberText);
-
-    results.push({
-      case_number: normalizeCaseNumber(caseNumberText),
-      title,
-      sport: sport || undefined,
-      procedure_type: procedureType || undefined,
-      date: date || undefined,
-      parties: appellant || respondent ? {
-        appellant: appellant || undefined,
-        respondent: respondent || undefined
-      } : undefined,
-      url: absoluteUrl,
-      pdf_url: pdfUrl
-    });
-  });
-
-  // Apply client-side filters if needed
-  let filtered = results;
-
-  if (input.sport) {
-    filtered = filtered.filter(r =>
-      r.sport?.toLowerCase().includes(input.sport!.toLowerCase())
-    );
   }
 
-  if (input.procedure_type) {
-    filtered = filtered.filter(r =>
-      r.procedure_type?.toLowerCase().includes(input.procedure_type!.toLowerCase())
-    );
+  // Check cache
+  const cacheKey = `award:${normalizedCaseNumber || url}:${includeFullText}`;
+  const cached = awardCache.get(cacheKey);
+  if (cached) {
+    return cached as CasAwardOutput;
   }
 
-  if (input.year_from) {
-    filtered = filtered.filter(r => {
-      const yearMatch = r.case_number.match(/CAS\s*(\d{4})/);
-      if (yearMatch) {
-        return parseInt(yearMatch[1], 10) >= input.year_from!;
-      }
-      return true;
-    });
-  }
+  // Wait for rate limiter
+  await jurisprudenceRateLimiter.waitForSlot();
 
-  if (input.year_to) {
-    filtered = filtered.filter(r => {
-      const yearMatch = r.case_number.match(/CAS\s*(\d{4})/);
-      if (yearMatch) {
-        return parseInt(yearMatch[1], 10) <= input.year_to!;
-      }
-      return true;
-    });
-  }
-
-  return filtered;
-}
-
-/**
- * Get total results count from page
- */
-async function getTotalResults(page: Page): Promise<number> {
   try {
-    const pageInfoText = await page.textContent(SELECTORS.pageInfo).catch(() => null);
-
-    if (pageInfoText) {
-      const match = pageInfoText.match(/(\d+)\s*(?:results|decisions|cases)/i);
-      if (match) {
-        return parseInt(match[1], 10);
+    const result = await withPage(async (page) => {
+      // Build URL
+      let targetUrl = url;
+      if (!targetUrl && normalizedCaseNumber) {
+        const parsed = parseCaseNumber(normalizedCaseNumber);
+        targetUrl = `${BASE_URL}/decision/${parsed.year}/${parsed.type}/${String(parsed.number).padStart(4, '0')}`;
       }
-    }
 
-    // Fallback: count table rows
-    const count = await page.$$eval(SELECTORS.resultRow, items => items.length);
-    return count;
-  } catch {
-    return 0;
+      if (!targetUrl) {
+        return { found: false, award: null, error: 'No URL or case number provided' };
+      }
+
+      await navigateAndWait(page, targetUrl, 'networkidle');
+      const html = await page.content();
+      const $ = cheerio.load(html);
+
+      // Check if we found the award
+      const notFound = $('body').text().toLowerCase().includes('not found') ||
+                       $('body').text().toLowerCase().includes('no result');
+      
+      if (notFound) {
+        return { found: false, award: null };
+      }
+
+      // Extract case number from page
+      const caseNumFromPage = $('.case-number, h1, [class*="case"]').first().text().trim();
+      const finalCaseNumber = normalizedCaseNumber || (caseNumFromPage ? normalizeCaseNumber(caseNumFromPage) : 'Unknown');
+
+      // Extract details
+      const title = $('h1, .title').first().text().trim();
+      const sport = $('.sport, [class*="sport"]').first().text().trim() || null;
+      const date = $('.date, [class*="date"]').first().text().trim();
+
+      // Extract parties
+      const appellant = $('.appellant, [class*="appellant"]').first().text().trim() || null;
+      const respondent = $('.respondent, [class*="respondent"]').first().text().trim() || null;
+
+      // Extract procedure type
+      const typeText = $('.type, [class*="procedure"]').first().text().trim();
+      const procedureType = mapProcedureType(typeText);
+
+      // Extract arbitrators
+      const arbitrators: CasAwardDetails['arbitrators'] = [];
+      $('.arbitrator, [class*="arbitrator"]').each((_, el) => {
+        const name = $(el).text().trim();
+        const isPresident = name.toLowerCase().includes('president');
+        arbitrators.push({
+          name: name.replace(/president[:\s]*/i, '').trim(),
+          role: isPresident ? 'President' : 'Arbitrator'
+        });
+      });
+
+      // Extract keywords
+      const keywords: string[] = [];
+      $('.keyword, [class*="keyword"], .tag').each((_, el) => {
+        const keyword = $(el).text().trim();
+        if (keyword) keywords.push(keyword);
+      });
+
+      // Extract operative part
+      const operativePart = $('.operative-part, [class*="operative"], .decision').first().text().trim() || null;
+
+      // Extract summary
+      const summary = $('.summary, [class*="summary"]').first().text().trim() || null;
+
+      // Generate PDF URL
+      const pdfUrl = generatePdfUrl(finalCaseNumber);
+
+      const award: CasAwardDetails = {
+        case_number: caseNumFromPage || finalCaseNumber,
+        case_number_normalized: finalCaseNumber,
+        title: title || `CAS Decision ${finalCaseNumber}`,
+        sport,
+        procedure_type: procedureType,
+        date,
+        parties: { appellant, respondent },
+        arbitrators,
+        keywords,
+        operative_part: operativePart ? cleanText(operativePart) : null,
+        summary: summary ? cleanText(summary) : null,
+        full_text: includeFullText ? 'Full text extraction requires PDF parsing - not implemented in this version' : null,
+        pdf_url: pdfUrl,
+        source_url: targetUrl
+      };
+
+      return { found: true, award };
+    });
+
+    // Cache the result
+    awardCache.set(cacheKey, result);
+    return result;
+  } finally {
+    jurisprudenceRateLimiter.releaseSlot();
   }
-}
-
-/**
- * Extract award metadata from parsed HTML
- */
-function extractAwardMetadata(
-  $: cheerio.CheerioAPI,
-  caseNumber: string,
-  url: string
-): Omit<CasAwardOutput, 'full_text' | 'extraction_status'> {
-  const title = cleanText($(SELECTORS.awardTitle).text());
-  const metadataText = $(SELECTORS.awardMetadata).text();
-
-  const sportMatch = metadataText.match(/Sport:\s*([^\n]+)/i);
-  const sport = sportMatch ? cleanText(sportMatch[1]) : undefined;
-
-  const procedureMatch = metadataText.match(/(?:Procedure|Type):\s*([^\n]+)/i);
-  const procedureType = procedureMatch ? cleanText(procedureMatch[1]) : undefined;
-
-  const dateMatch = metadataText.match(/Date:\s*([^\n]+)/i);
-  const date = dateMatch ? cleanText(dateMatch[1]) : undefined;
-
-  const partiesMatch = metadataText.match(/Parties:\s*([^\n]+(?:\n\s+[^\n]+)*)/i);
-  const parties = partiesMatch ? parseParties(cleanText(partiesMatch[1])) : undefined;
-
-  const arbitratorsText = $(SELECTORS.arbitrators).text();
-  const arbitrators = parseArbitrators(arbitratorsText);
-
-  const keywordsText = $(SELECTORS.keywords).text();
-  const keywords = parseKeywords(keywordsText);
-
-  const operativePart = cleanText($(SELECTORS.operativePart).text()) || undefined;
-  const pdfUrl = generatePdfUrl(caseNumber);
-
-  return {
-    case_number: caseNumber,
-    title,
-    sport,
-    procedure_type: procedureType,
-    date,
-    parties,
-    arbitrators: arbitrators.length > 0 ? arbitrators : undefined,
-    keywords: keywords.length > 0 ? keywords : undefined,
-    operative_part: operativePart,
-    pdf_url: pdfUrl,
-    url
-  };
-}
-
-/**
- * Parse parties string into structured format
- */
-function parseParties(text: string): { appellant?: string; respondent?: string } | undefined {
-  const vsMatch = text.match(/(.+?)\s+(?:v\.|vs\.|against)\s+(.+)/i);
-
-  if (vsMatch) {
-    return {
-      appellant: cleanText(vsMatch[1]),
-      respondent: cleanText(vsMatch[2])
-    };
-  }
-
-  return undefined;
-}
-
-/**
- * Parse arbitrators from text
- */
-function parseArbitrators(text: string): Array<{ name: string; role?: 'President' | 'Arbitrator' | 'Co-Arbitrator' }> {
-  const arbitrators: Array<{ name: string; role?: 'President' | 'Arbitrator' | 'Co-Arbitrator' }> = [];
-  const parts = text.split(/[,;]/);
-
-  for (const part of parts) {
-    const cleanPart = cleanText(part);
-    if (!cleanPart || cleanPart.length < 3) continue;
-
-    let role: 'President' | 'Arbitrator' | 'Co-Arbitrator' | undefined;
-    let name = cleanPart;
-
-    if (/president/i.test(cleanPart)) {
-      role = 'President';
-      name = cleanPart.replace(/president[:\s]*/i, '');
-    } else if (/co-arbitrator/i.test(cleanPart)) {
-      role = 'Co-Arbitrator';
-      name = cleanPart.replace(/co-arbitrator[:\s]*/i, '');
-    } else if (/arbitrator/i.test(cleanPart)) {
-      role = 'Arbitrator';
-      name = cleanPart.replace(/arbitrator[:\s]*/i, '');
-    }
-
-    if (name.length > 2) {
-      arbitrators.push({ name, role });
-    }
-  }
-
-  return arbitrators;
-}
-
-/**
- * Parse keywords from text
- */
-function parseKeywords(text: string): string[] {
-  return text
-    .split(/[,;]/)
-    .map(k => cleanText(k))
-    .filter(k => k.length > 2 && k.length < 50);
 }

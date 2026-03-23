@@ -1,0 +1,280 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<evaluation>
+  <metadata>
+    <name>TAS/CAS Jurisprudence MCP Server</name>
+    <version>1.0.0</version>
+    <created>2026-03-23</created>
+    <description>Test cases for validating CAS/TAS jurisprudence MCP server functionality</description>
+  </metadata>
+
+  <testCases>
+    <!-- Test Case 1: Basic Search -->
+    <testCase id="TC-001" priority="high">
+      <name>Search for recent doping cases in cycling</name>
+      <description>Verify basic search functionality with sport filter and keywords</description>
+      <tool>cas_search</tool>
+      <input>
+        <query>doping</query>
+        <sport>cycling</sport>
+        <page_size>5</page_size>
+      </input>
+      <expectedOutput>
+        <type>object</type>
+        <requiredFields>
+          <field>results</field>
+          <field>total</field>
+          <field>page</field>
+        </requiredFields>
+        <validation>
+          <condition>results.length &lt;= 5</condition>
+          <condition>total &gt;= 0</condition>
+          <condition>Each result has case_number, title, url</condition>
+        </validation>
+      </expectedOutput>
+      <notes>Tests search API integration and sport filtering</notes>
+    </testCase>
+
+    <!-- Test Case 2: Get Award by Case Number -->
+    <testCase id="TC-002" priority="high">
+      <name>Get award details by case number</name>
+      <description>Retrieve specific award using normalized case number format</description>
+      <tool>cas_get_award</tool>
+      <input>
+        <case_number>CAS 2023/A/9876</case_number>
+        <include_full_text>false</include_full_text>
+      </input>
+      <expectedOutput>
+        <type>object</type>
+        <requiredFields>
+          <field>case_number</field>
+          <field>url</field>
+        </requiredFields>
+        <validation>
+          <condition>case_number is normalized</condition>
+          <condition>url contains .pdf or award page</condition>
+        </validation>
+      </expectedOutput>
+      <notes>Tests case number normalization and award retrieval</notes>
+    </testCase>
+
+    <!-- Test Case 3: Recent Decisions -->
+    <testCase id="TC-003" priority="high">
+      <name>List recent decisions</name>
+      <description>Verify recent decisions endpoint returns structured data</description>
+      <tool>cas_recent</tool>
+      <input>
+        <limit>10</limit>
+      </input>
+      <expectedOutput>
+        <type>object</type>
+        <requiredFields>
+          <field>decisions</field>
+          <field>count</field>
+        </requiredFields>
+        <validation>
+          <condition>decisions.length &lt;= 10</condition>
+          <condition>Each decision has case_number, date, parties</condition>
+        </validation>
+      </expectedOutput>
+      <notes>Tests recent decisions scraper functionality</notes>
+    </testCase>
+
+    <!-- Test Case 4: Browse by Sport -->
+    <testCase id="TC-004" priority="medium">
+      <name>Browse all football-related cases</name>
+      <description>Test sport-specific browsing with pagination</description>
+      <tool>cas_by_sport</tool>
+      <input>
+        <sport>football</sport>
+        <page>1</page>
+      </input>
+      <expectedOutput>
+        <type>object</type>
+        <requiredFields>
+          <field>results</field>
+          <field>sport</field>
+          <field>page</field>
+          <field>hasMore</field>
+        </requiredFields>
+        <validation>
+          <condition>sport equals "football"</condition>
+          <condition>page equals 1</condition>
+        </validation>
+      </expectedOutput>
+      <notes>Tests sport filtering and pagination</notes>
+    </testCase>
+
+    <!-- Test Case 5: Year Range Filter -->
+    <testCase id="TC-005" priority="medium">
+      <name>Search with year range filter</name>
+      <description>Verify year range filtering in search</description>
+      <tool>cas_search</tool>
+      <input>
+        <query>arbitration</query>
+        <year_from>2020</year_from>
+        <year_to>2023</year_to>
+        <page_size>10</page_size>
+      </input>
+      <expectedOutput>
+        <type>object</type>
+        <requiredFields>
+          <field>results</field>
+          <field>filters</field>
+        </requiredFields>
+        <validation>
+          <condition>All results have year between 2020-2023</condition>
+          <condition>filters.year_from equals 2020</condition>
+          <condition>filters.year_to equals 2023</condition>
+        </validation>
+      </expectedOutput>
+      <notes>Tests year range filtering logic</notes>
+    </testCase>
+
+    <!-- Test Case 6: Full Text Retrieval -->
+    <testCase id="TC-006" priority="low">
+      <name>Get operative part of specific award</name>
+      <description>Test optional full text extraction from PDF</description>
+      <tool>cas_get_award</tool>
+      <input>
+        <case_number>CAS 2022/O/7890</case_number>
+        <include_full_text>true</include_full_text>
+      </input>
+      <expectedOutput>
+        <type>object</type>
+        <requiredFields>
+          <field>case_number</field>
+          <field>full_text</field>
+        </requiredFields>
+        <validation>
+          <condition>full_text is not empty when available</condition>
+          <condition>full_text contains substantive content</condition>
+        </validation>
+      </expectedOutput>
+      <notes>Tests PDF parsing - may be slow, marked low priority</notes>
+    </testCase>
+
+    <!-- Test Case 7: Keyword Search -->
+    <testCase id="TC-007" priority="medium">
+      <name>Search for "strict liability" keyword</name>
+      <description>Test legal keyword search functionality</description>
+      <tool>cas_search</tool>
+      <input>
+        <query>"strict liability"</query>
+        <page_size>5</page_size>
+      </input>
+      <expectedOutput>
+        <type>object</type>
+        <requiredFields>
+          <field>results</field>
+        </requiredFields>
+        <validation>
+          <condition>Results are relevant to strict liability doctrine</condition>
+          <condition>Each result has highlighted or relevant context</condition>
+        </validation>
+      </expectedOutput>
+      <notes>Tests phrase search and relevance ranking</notes>
+    </testCase>
+
+    <!-- Test Case 8: Procedure Type Filter -->
+    <testCase id="TC-008" priority="medium">
+      <name>Browse by procedure type (Appeal)</name>
+      <description>Filter decisions by CAS procedure type</description>
+      <tool>cas_search</tool>
+      <input>
+        <query></query>
+        <procedure_type>Appeal</procedure_type>
+        <page_size>10</page_size>
+      </input>
+      <expectedOutput>
+        <type>object</type>
+        <requiredFields>
+          <field>results</field>
+          <field>filters</field>
+        </requiredFields>
+        <validation>
+          <condition>All results are Appeal procedures</condition>
+          <condition>filters.procedure_type equals "Appeal"</condition>
+        </validation>
+      </expectedOutput>
+      <notes>Tests procedure type filtering</notes>
+    </testCase>
+
+    <!-- Test Case 9: Case Number Normalization -->
+    <testCase id="TC-009" priority="high">
+      <name>Verify case number normalization</name>
+      <description>Test various case number format inputs</description>
+      <tool>cas_get_award</tool>
+      <inputVariants>
+        <variant>
+          <input>
+            <case_number>2023/A/9876</case_number>
+          </input>
+          <expected>CAS 2023/A/9876</expected>
+        </variant>
+        <variant>
+          <input>
+            <case_number>cas 2023 a 9876</case_number>
+          </input>
+          <expected>CAS 2023/A/9876</expected>
+        </variant>
+        <variant>
+          <input>
+            <case_number>TAS 2023/A/9876</case_number>
+          </input>
+          <expected>CAS 2023/A/9876</expected>
+        </variant>
+      </inputVariants>
+      <expectedOutput>
+        <type>object</type>
+        <validation>
+          <condition>case_number is normalized to CAS YYYY/X/NNNN format</condition>
+          <condition>Consistent normalization across all variants</condition>
+        </validation>
+      </expectedOutput>
+      <notes>Critical for user experience - users may input various formats</notes>
+    </testCase>
+
+    <!-- Test Case 10: Rate Limiting -->
+    <testCase id="TC-010" priority="high">
+      <name>Test rate limiting behavior</name>
+      <description>Verify 10-second crawl delay is respected</description>
+      <tool>cas_search</tool>
+      <input>
+        <query>test query 1</query>
+      </input>
+      <execution>
+        <steps>
+          <step>Execute first search request</step>
+          <step>Record timestamp T1</step>
+          <step>Execute second search request immediately</step>
+          <step>Record timestamp T2</step>
+          <step>Verify T2 - T1 >= 10 seconds</step>
+        </steps>
+      </execution>
+      <expectedOutput>
+        <type>behavioral</type>
+        <validation>
+          <condition>Second request is delayed by at least 10 seconds</condition>
+          <condition>No errors during rate-limited execution</condition>
+          <condition>Queue processing is FIFO</condition>
+        </validation>
+      </expectedOutput>
+      <notes>Compliance with robots.txt crawl-delay requirement</notes>
+    </testCase>
+  </testCases>
+
+  <executionConfig>
+    <parallelExecution>false</parallelExecution>
+    <stopOnFailure>false</stopOnFailure>
+    <timeoutSeconds>60</timeoutSeconds>
+    <retryCount>2</retryCount>
+    <rateLimitSeconds>10</rateLimitSeconds>
+  </executionConfig>
+
+  <reporting>
+    <format>junit</format>
+    <outputPath>./evaluation/results.xml</outputPath>
+    <includeTimings>true</includeTimings>
+    <includeMemoryUsage>false</includeMemoryUsage>
+  </reporting>
+</evaluation>

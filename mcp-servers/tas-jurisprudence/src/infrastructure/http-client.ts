@@ -1,18 +1,17 @@
 /**
  * TAS/CAS Jurisprudence MCP Server - HTTP Client
- * Fetch wrapper with timeout and custom headers
+ * Fetch wrapper with timeout and proper headers
  */
 
-import { CAS_CONSTANTS } from '../types.js';
+import { DEFAULT_SCRAPER_CONFIG } from '../types.js';
 
 /**
- * HTTP response wrapper
+ * HTTP client configuration
  */
-export interface HttpResponse<T = unknown> {
-  data: T;
-  status: number;
-  headers: Headers;
-  url: string;
+export interface HttpClientConfig {
+  timeout?: number;
+  userAgent?: string;
+  headers?: Record<string, string>;
 }
 
 /**
@@ -20,211 +19,103 @@ export interface HttpResponse<T = unknown> {
  */
 export class HttpError extends Error {
   constructor(
-    public status: number,
-    public statusText: string,
-    public url: string,
-    public body?: string
+    message: string,
+    public readonly status: number,
+    public readonly url: string
   ) {
-    super(`HTTP ${status} ${statusText}: ${url}`);
+    super(message);
     this.name = 'HttpError';
   }
 }
 
 /**
- * Configuration for HTTP requests
+ * Create a fetch request with timeout and default headers
  */
-export interface HttpRequestConfig {
-  method?: 'GET' | 'POST' | 'PUT' | 'DELETE';
-  headers?: Record<string, string>;
-  body?: string | Record<string, unknown>;
-  timeout?: number;
-  signal?: AbortSignal;
-}
+export async function httpFetch(
+  url: string,
+  config: HttpClientConfig = {}
+): Promise<Response> {
+  const {
+    timeout = DEFAULT_SCRAPER_CONFIG.timeout,
+    userAgent = DEFAULT_SCRAPER_CONFIG.userAgent,
+    headers: customHeaders = {}
+  } = config;
 
-/**
- * HTTP client for making requests to CAS websites
- */
-export class HttpClient {
-  private readonly baseUrl: string;
-  private readonly defaultHeaders: Headers;
-  private readonly defaultTimeout: number;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeout);
 
-  constructor(
-    baseUrl: string = '',
-    timeout: number = CAS_CONSTANTS.REQUEST_TIMEOUT_MS
-  ) {
-    this.baseUrl = baseUrl;
-    this.defaultTimeout = timeout;
-    this.defaultHeaders = new Headers({
-      'User-Agent': CAS_CONSTANTS.USER_AGENT,
-      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-      'Accept-Language': 'en-US,en;q=0.5',
-      'Accept-Encoding': 'gzip, deflate',
-      'Connection': 'keep-alive',
-      'Upgrade-Insecure-Requests': '1'
-    });
-  }
+  const headers: Record<string, string> = {
+    'User-Agent': userAgent,
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+    'Accept-Language': 'en-US,en;q=0.5',
+    ...customHeaders
+  };
 
-  /**
-   * Make a GET request
-   */
-  async get<T = unknown>(
-    path: string,
-    config?: HttpRequestConfig
-  ): Promise<HttpResponse<T>> {
-    return this.request<T>(path, { ...config, method: 'GET' });
-  }
-
-  /**
-   * Make a POST request
-   */
-  async post<T = unknown>(
-    path: string,
-    body: Record<string, unknown>,
-    config?: HttpRequestConfig
-  ): Promise<HttpResponse<T>> {
-    return this.request<T>(path, {
-      ...config,
-      method: 'POST',
-      body
-    });
-  }
-
-  /**
-   * Make a generic HTTP request
-   */
-  async request<T = unknown>(
-    path: string,
-    config: HttpRequestConfig = {}
-  ): Promise<HttpResponse<T>> {
-    const url = this.buildUrl(path);
-    const timeout = config.timeout ?? this.defaultTimeout;
-
-    // Build headers
-    const headers = new Headers(this.defaultHeaders);
-    if (config.headers) {
-      Object.entries(config.headers).forEach(([key, value]) => {
-        headers.set(key, value);
-      });
-    }
-
-    // Build request options
-    const options: RequestInit = {
-      method: config.method ?? 'GET',
+  try {
+    const response = await fetch(url, {
       headers,
-      signal: config.signal
-    };
+      signal: controller.signal
+    });
 
-    // Add body if present
-    if (config.body) {
-      if (typeof config.body === 'string') {
-        options.body = config.body;
-      } else {
-        options.body = JSON.stringify(config.body);
-        headers.set('Content-Type', 'application/json');
-      }
+    if (!response.ok) {
+      throw new HttpError(
+        `HTTP ${response.status}: ${response.statusText}`,
+        response.status,
+        url
+      );
     }
 
-    // Create timeout controller
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), timeout);
-
-    // Use provided signal or timeout signal
-    if (config.signal) {
-      config.signal.addEventListener('abort', () => controller.abort());
+    return response;
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new HttpError(
+        `Request timed out after ${timeout}ms`,
+        408,
+        url
+      );
     }
-    options.signal = controller.signal;
-
-    try {
-      const response = await fetch(url, options);
-      clearTimeout(timeoutId);
-
-      if (!response.ok) {
-        const body = await response.text().catch(() => '');
-        throw new HttpError(
-          response.status,
-          response.statusText,
-          url,
-          body
-        );
-      }
-
-      // Determine response type
-      const contentType = response.headers.get('content-type') || '';
-      let data: T;
-
-      if (contentType.includes('application/json')) {
-        data = await response.json() as T;
-      } else {
-        data = await response.text() as T;
-      }
-
-      return {
-        data,
-        status: response.status,
-        headers: response.headers,
-        url: response.url
-      };
-    } catch (error) {
-      clearTimeout(timeoutId);
-
-      if (error instanceof HttpError) {
-        throw error;
-      }
-
-      if (error instanceof Error) {
-        if (error.name === 'AbortError') {
-          throw new Error(`Request timeout after ${timeout}ms: ${url}`);
-        }
-        throw new Error(`Network error: ${error.message}`);
-      }
-
-      throw error;
-    }
-  }
-
-  /**
-   * Build full URL from path
-   */
-  private buildUrl(path: string): string {
-    if (path.startsWith('http://') || path.startsWith('https://')) {
-      return path;
-    }
-
-    if (this.baseUrl) {
-      const baseUrl = this.baseUrl.endsWith('/')
-        ? this.baseUrl.slice(0, -1)
-        : this.baseUrl;
-      const normalizedPath = path.startsWith('/') ? path : `/${path}`;
-      return `${baseUrl}${normalizedPath}`;
-    }
-
-    return path;
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
   }
 }
 
-// ============================================================================
-// Pre-configured Clients
-// ============================================================================
+/**
+ * Fetch and return text content
+ */
+export async function fetchText(
+  url: string,
+  config: HttpClientConfig = {}
+): Promise<string> {
+  const response = await httpFetch(url, config);
+  return response.text();
+}
 
 /**
- * Client for CAS jurisprudence database
+ * Fetch and return JSON content
  */
-export const jurisprudenceClient = new HttpClient(
-  CAS_CONSTANTS.BASE_URL
-);
+export async function fetchJson<T>(
+  url: string,
+  config: HttpClientConfig = {}
+): Promise<T> {
+  const response = await httpFetch(url, {
+    ...config,
+    headers: {
+      ...config.headers,
+      'Accept': 'application/json'
+    }
+  });
+  return response.json() as Promise<T>;
+}
 
 /**
- * Client for CAS main website
+ * Check if a URL is accessible
  */
-export const websiteClient = new HttpClient(
-  'https://www.tas-cas.org'
-);
-
-/**
- * Client for fetching PDF files
- */
-export const pdfClient = new HttpClient(
-  '',
-  30000 // Longer timeout for PDFs
-);
+export async function checkUrl(url: string): Promise<boolean> {
+  try {
+    const response = await httpFetch(url, { timeout: 5000 });
+    return response.ok;
+  } catch {
+    return false;
+  }
+}

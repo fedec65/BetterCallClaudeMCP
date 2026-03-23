@@ -1,38 +1,36 @@
 /**
  * TAS/CAS Jurisprudence MCP Server - Cache Infrastructure
- * Simple Map-based TTL cache for search results and awards
+ * Simple Map-based cache with TTL support
  */
 
-import { CAS_CONSTANTS, CacheEntry } from '../types.js';
+import type { CacheEntry } from '../types.js';
 
 /**
- * Generic TTL Cache implementation
+ * Simple TTL cache implementation
  */
 export class Cache<T> {
-  private store: Map<string, CacheEntry<T>> = new Map();
+  private cache: Map<string, CacheEntry<T>> = new Map();
   private defaultTtl: number;
-  private cleanupInterval: ReturnType<typeof setInterval>;
+  private maxSize: number;
 
-  constructor(defaultTtl: number = CAS_CONSTANTS.CACHE_TTL.SEARCH) {
-    this.defaultTtl = defaultTtl;
-
-    // Cleanup expired entries every minute
-    this.cleanupInterval = setInterval(() => this.cleanup(), 60000);
+  constructor(defaultTtlMs: number = 60000, maxSize: number = 100) {
+    this.defaultTtl = defaultTtlMs;
+    this.maxSize = maxSize;
   }
 
   /**
-   * Get a cached value
+   * Get a value from the cache
    */
   get(key: string): T | null {
-    const entry = this.store.get(key);
-
+    const entry = this.cache.get(key);
+    
     if (!entry) {
       return null;
     }
 
     // Check if expired
-    if (Date.now() - entry.timestamp > entry.ttl) {
-      this.store.delete(key);
+    if (Date.now() > entry.timestamp + entry.ttl) {
+      this.cache.delete(key);
       return null;
     }
 
@@ -40,133 +38,101 @@ export class Cache<T> {
   }
 
   /**
-   * Set a cached value with optional TTL
+   * Set a value in the cache
    */
-  set(key: string, data: T, ttl?: number): void {
-    this.store.set(key, {
+  set(key: string, data: T, ttlMs?: number): void {
+    // Enforce max size by removing oldest entries
+    if (this.cache.size >= this.maxSize) {
+      const oldestKey = this.cache.keys().next().value;
+      if (oldestKey) {
+        this.cache.delete(oldestKey);
+      }
+    }
+
+    this.cache.set(key, {
       data,
       timestamp: Date.now(),
-      ttl: ttl ?? this.defaultTtl
+      ttl: ttlMs ?? this.defaultTtl
     });
   }
 
   /**
-   * Check if key exists and is not expired
+   * Check if a key exists and is not expired
    */
   has(key: string): boolean {
     return this.get(key) !== null;
   }
 
   /**
-   * Delete a cached value
+   * Delete a key from the cache
    */
   delete(key: string): boolean {
-    return this.store.delete(key);
+    return this.cache.delete(key);
   }
 
   /**
-   * Clear all cached values
+   * Clear all entries from the cache
    */
   clear(): void {
-    this.store.clear();
+    this.cache.clear();
   }
 
   /**
-   * Get cache statistics
+   * Get the number of entries in the cache
    */
-  stats(): { size: number; keys: string[] } {
-    return {
-      size: this.store.size,
-      keys: Array.from(this.store.keys())
-    };
+  get size(): number {
+    return this.cache.size;
   }
 
   /**
-   * Remove expired entries
+   * Clean up expired entries
    */
-  private cleanup(): void {
+  cleanup(): number {
     const now = Date.now();
-    for (const [key, entry] of this.store.entries()) {
-      if (now - entry.timestamp > entry.ttl) {
-        this.store.delete(key);
+    let cleaned = 0;
+
+    for (const [key, entry] of this.cache.entries()) {
+      if (now > entry.timestamp + entry.ttl) {
+        this.cache.delete(key);
+        cleaned++;
       }
     }
-  }
 
-  /**
-   * Destroy cache and cleanup interval
-   */
-  destroy(): void {
-    clearInterval(this.cleanupInterval);
-    this.store.clear();
+    return cleaned;
   }
 }
 
 // ============================================================================
-// Cache Instances
+// Cache Instances with Different TTLs
 // ============================================================================
 
 /**
- * Cache for search results (10 min TTL)
+ * Search results cache - 10 minute TTL
+ * Search results don't change frequently
  */
-export const searchCache = new Cache<any>(CAS_CONSTANTS.CACHE_TTL.SEARCH);
+export const searchCache = new Cache<any>(10 * 60 * 1000, 50);
 
 /**
- * Cache for award details (30 min TTL)
+ * Award details cache - 30 minute TTL
+ * Award details are static once published
  */
-export const awardCache = new Cache<any>(CAS_CONSTANTS.CACHE_TTL.AWARD);
+export const awardCache = new Cache<any>(30 * 60 * 1000, 100);
 
 /**
- * Cache for recent decisions (5 min TTL)
+ * Recent decisions cache - 5 minute TTL
+ * Recent decisions page changes more frequently
  */
-export const recentCache = new Cache<any>(CAS_CONSTANTS.CACHE_TTL.RECENT);
-
-// ============================================================================
-// Cache Key Generators
-// ============================================================================
+export const recentCache = new Cache<any>(5 * 60 * 1000, 10);
 
 /**
- * Generate cache key for search queries
+ * Sport browse cache - 15 minute TTL
  */
-export function searchCacheKey(params: {
-  query: string;
-  sport?: string;
-  year_from?: number;
-  year_to?: number;
-  procedure_type?: string;
-  page: number;
-  page_size: number;
-}): string {
-  const parts = [
-    `q:${params.query}`,
-    params.sport ? `s:${params.sport}` : '',
-    params.year_from ? `yf:${params.year_from}` : '',
-    params.year_to ? `yt:${params.year_to}` : '',
-    params.procedure_type ? `pt:${params.procedure_type}` : '',
-    `p:${params.page}`,
-    `ps:${params.page_size}`
-  ].filter(Boolean);
+export const sportCache = new Cache<any>(15 * 60 * 1000, 50);
 
-  return `search:${parts.join('|')}`;
-}
-
-/**
- * Generate cache key for award details
- */
-export function awardCacheKey(caseNumber: string, includeFullText: boolean): string {
-  return `award:${caseNumber}:${includeFullText ? 'full' : 'meta'}`;
-}
-
-/**
- * Generate cache key for recent decisions
- */
-export function recentCacheKey(limit: number): string {
-  return `recent:${limit}`;
-}
-
-/**
- * Generate cache key for browse by sport
- */
-export function sportCacheKey(sport: string, page: number, procedureType?: string): string {
-  return `sport:${sport}:${page}:${procedureType || 'all'}`;
-}
+// Periodic cleanup interval (every 5 minutes)
+setInterval(() => {
+  searchCache.cleanup();
+  awardCache.cleanup();
+  recentCache.cleanup();
+  sportCache.cleanup();
+}, 5 * 60 * 1000);

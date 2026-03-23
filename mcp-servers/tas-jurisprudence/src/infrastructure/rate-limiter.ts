@@ -1,48 +1,25 @@
 /**
  * TAS/CAS Jurisprudence MCP Server - Rate Limiter
- * Enforces 10-second crawl delay per robots.txt
- */
-
-import { CAS_CONSTANTS } from '../types.js';
-
-/**
- * Rate limiter state
- */
-interface RateLimiterState {
-  lastRequestTime: number;
-  queue: Array<{
-    resolve: () => void;
-    timestamp: number;
-  }>;
-  isProcessing: boolean;
-}
-
-/**
- * Rate limiter singleton for CAS website access
  * Respects robots.txt crawl-delay of 10 seconds
  */
+
+import { delay } from '../utils.js';
+
+/**
+ * Rate limiter with configurable minimum interval
+ * Uses a queue-based approach to ensure requests are spaced appropriately
+ */
 export class RateLimiter {
-  private static instance: RateLimiter;
-  private state: RateLimiterState;
-  private readonly delayMs: number;
+  private lastRequestTime: number = 0;
+  private minInterval: number;
+  private queue: Array<() => void> = [];
+  private processing: boolean = false;
+  private maxConcurrent: number;
+  private activeCount: number = 0;
 
-  private constructor(delayMs: number = CAS_CONSTANTS.CRAWL_DELAY_MS) {
-    this.delayMs = delayMs;
-    this.state = {
-      lastRequestTime: 0,
-      queue: [],
-      isProcessing: false
-    };
-  }
-
-  /**
-   * Get singleton instance
-   */
-  static getInstance(): RateLimiter {
-    if (!RateLimiter.instance) {
-      RateLimiter.instance = new RateLimiter();
-    }
-    return RateLimiter.instance;
+  constructor(minIntervalMs: number = 10000, maxConcurrent: number = 1) {
+    this.minInterval = minIntervalMs;
+    this.maxConcurrent = maxConcurrent;
   }
 
   /**
@@ -50,113 +27,120 @@ export class RateLimiter {
    * Returns a promise that resolves when it's safe to make a request
    */
   async waitForSlot(): Promise<void> {
-    return new Promise(resolve => {
-      this.state.queue.push({
-        resolve,
-        timestamp: Date.now()
-      });
+    // If we're under the concurrent limit and enough time has passed, proceed immediately
+    const now = Date.now();
+    const timeSinceLastRequest = now - this.lastRequestTime;
 
-      this.processQueue();
+    if (this.activeCount < this.maxConcurrent && timeSinceLastRequest >= this.minInterval) {
+      this.lastRequestTime = now;
+      this.activeCount++;
+      return;
+    }
+
+    // Otherwise, queue the request
+    return new Promise<void>((resolve) => {
+      this.queue.push(() => {
+        this.lastRequestTime = Date.now();
+        this.activeCount++;
+        resolve();
+      });
+      
+      if (!this.processing) {
+        this.processQueue();
+      }
     });
+  }
+
+  /**
+   * Release a slot after a request is complete
+   */
+  releaseSlot(): void {
+    this.activeCount = Math.max(0, this.activeCount - 1);
+    
+    if (!this.processing && this.queue.length > 0) {
+      this.processQueue();
+    }
   }
 
   /**
    * Process the queue of waiting requests
    */
-  private processQueue(): void {
-    if (this.state.isProcessing || this.state.queue.length === 0) {
-      return;
-    }
+  private async processQueue(): Promise<void> {
+    if (this.processing) return;
+    this.processing = true;
 
-    this.state.isProcessing = true;
-
-    const processNext = async (): Promise<void> => {
-      if (this.state.queue.length === 0) {
-        this.state.isProcessing = false;
-        return;
-      }
-
+    while (this.queue.length > 0 && this.activeCount < this.maxConcurrent) {
       const now = Date.now();
-      const elapsed = now - this.state.lastRequestTime;
-      const waitTime = Math.max(0, this.delayMs - elapsed);
-
-      if (waitTime > 0) {
-        await this.delay(waitTime);
+      const timeSinceLastRequest = now - this.lastRequestTime;
+      
+      // Wait if we haven't reached the minimum interval
+      if (timeSinceLastRequest < this.minInterval) {
+        const waitTime = this.minInterval - timeSinceLastRequest;
+        await delay(waitTime);
       }
 
-      const next = this.state.queue.shift();
+      // Process the next request in queue
+      const next = this.queue.shift();
       if (next) {
-        this.state.lastRequestTime = Date.now();
-        next.resolve();
-      }
-
-      // Process next in queue
-      if (this.state.queue.length > 0) {
-        // Use setImmediate-like behavior to prevent stack overflow
-        setTimeout(() => processNext(), 0);
-      } else {
-        this.state.isProcessing = false;
-      }
-    };
-
-    processNext();
-  }
-
-  /**
-   * Promise-based delay
-   */
-  private delay(ms: number): Promise<void> {
-    return new Promise(resolve => setTimeout(resolve, ms));
-  }
-
-  /**
-   * Get current state for debugging
-   */
-  getState(): { queueLength: number; lastRequestTime: number; delayMs: number } {
-    return {
-      queueLength: this.state.queue.length,
-      lastRequestTime: this.state.lastRequestTime,
-      delayMs: this.delayMs
-    };
-  }
-
-  /**
-   * Clear the queue (for testing or emergency situations)
-   */
-  clearQueue(): void {
-    // Resolve all waiting requests
-    while (this.state.queue.length > 0) {
-      const next = this.state.queue.shift();
-      if (next) {
-        next.resolve();
+        next();
       }
     }
-    this.state.isProcessing = false;
+
+    this.processing = false;
+  }
+
+  /**
+   * Get the number of requests waiting in queue
+   */
+  get queueLength(): number {
+    return this.queue.length;
+  }
+
+  /**
+   * Get the number of active requests
+   */
+  get activeRequests(): number {
+    return this.activeCount;
+  }
+
+  /**
+   * Clear the queue and reset state
+   */
+  clear(): void {
+    this.queue = [];
+    this.activeCount = 0;
+    this.processing = false;
   }
 }
 
-/**
- * Convenience function to get rate limiter instance
- */
-export function getRateLimiter(): RateLimiter {
-  return RateLimiter.getInstance();
-}
+// ============================================================================
+// Singleton Rate Limiter Instances
+// ============================================================================
 
 /**
- * Decorator for rate-limited functions
- * Usage: @rateLimited async myFunction() { ... }
+ * Main rate limiter for jurisprudence.tas-cas.org
+ * Respects 10-second crawl-delay from robots.txt
  */
-export function rateLimited(
-  _target: unknown,
-  _propertyKey: string,
-  descriptor: PropertyDescriptor
-): PropertyDescriptor {
-  const originalMethod = descriptor.value;
+export const jurisprudenceRateLimiter = new RateLimiter(10000, 1);
 
-  descriptor.value = async function (...args: unknown[]): Promise<unknown> {
-    await getRateLimiter().waitForSlot();
-    return originalMethod.apply(this, args);
-  };
+/**
+ * Rate limiter for tas-cas.org (recent decisions, etc.)
+ * More lenient - 2 second delay
+ */
+export const tasCasRateLimiter = new RateLimiter(2000, 1);
 
-  return descriptor;
+/**
+ * Execute a function with rate limiting
+ * Automatically handles slot acquisition and release
+ */
+export async function withRateLimit<T>(
+  limiter: RateLimiter,
+  fn: () => Promise<T>
+): Promise<T> {
+  await limiter.waitForSlot();
+  try {
+    return await fn();
+  } finally {
+    limiter.releaseSlot();
+  }
 }
