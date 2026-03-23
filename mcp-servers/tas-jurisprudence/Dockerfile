@@ -31,8 +31,10 @@ COPY --from=builder /app/dist ./dist
 # Install only production dependencies
 RUN npm ci --only=production
 
-# Install Playwright browsers
-RUN npx playwright install chromium --with-deps
+# Install curl for health checks and Playwright browsers with dependencies
+RUN apt-get update && apt-get install -y curl && \
+    npx playwright install chromium --with-deps && \
+    rm -rf /var/lib/apt/lists/*
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
