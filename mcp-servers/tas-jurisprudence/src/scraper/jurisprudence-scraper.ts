@@ -37,57 +37,67 @@ function buildSearchUrl(input: CasSearchInput): string {
 }
 
 /**
- * Parse a search result from HTML
+ * Parse a search result from Angular table row
+ * Site uses Angular 18 with table structure:
+ * td[0]=Lang, td[1]=Year, td[2]=Type, td[3]=Case#, td[4]=Appellant,
+ * td[5]=Respondent, td[6]=Sport, td[7]=Matter, td[8]=Date, td[9]=Outcome
  */
 function parseSearchResult($: cheerio.CheerioAPI, element: AnyNode): CasSearchResult | null {
-  const $el = $(element);
-  
+  const $row = $(element);
+
   try {
-    // Extract case number
-    const caseNumberText = $el.find('.case-number, .caseNumber, [class*="case"]').first().text().trim();
-    if (!caseNumberText) return null;
+    // Get all table cells
+    const cells = $row.find('td');
+    if (cells.length < 10) return null;
 
-    const caseNumberNormalized = normalizeCaseNumber(caseNumberText);
+    // Extract data from table cells by index
+    // cells[0] = language (not used in output)
+    const year = $(cells[1]).text().trim();
+    const procType = $(cells[2]).text().trim();
+    const caseNumberText = $(cells[3]).text().trim();
+    const appellant = $(cells[4]).text().trim();
+    const respondent = $(cells[5]).text().trim();
+    const sport = $(cells[6]).text().trim();
+    // cells[7] = matter (not used in output)
+    const date = $(cells[8]).text().trim();
+    const outcome = $(cells[9]).text().trim();
 
-    // Extract title
-    const title = $el.find('.title, h3, h4, [class*="title"]').first().text().trim();
+    if (!caseNumberText || !year) return null;
 
-    // Extract sport
-    const sport = $el.find('.sport, [class*="sport"]').first().text().trim() || null;
+    // Build normalized case number: CAS YYYY/A/NNNN
+    const caseNumberNormalized = `CAS ${year}/${procType}/${caseNumberText}`;
 
-    // Extract procedure type
-    const typeText = $el.find('.type, .procedure-type, [class*="type"]').first().text().trim();
-    const procedureType = mapProcedureType(typeText);
+    // Map procedure type
+    const procedureType = mapProcedureType(procType);
 
-    // Extract date
-    const date = $el.find('.date, [class*="date"]').first().text().trim();
+    // Build title from parties
+    const title = appellant && respondent
+      ? `${appellant} v. ${respondent}`
+      : `CAS Decision ${caseNumberNormalized}`;
 
-    // Extract parties
-    const appellant = $el.find('.appellant, [class*="appellant"]').first().text().trim() || null;
-    const respondent = $el.find('.respondent, [class*="respondent"]').first().text().trim() || null;
-
-    // Extract URL
-    const link = $el.find('a[href*="/decision/"], a[href*="/award/"]').first();
-    const href = link.attr('href') || '';
-    const url = href.startsWith('http') ? href : `${BASE_URL}${href}`;
-
-    // Extract snippet
-    const snippet = $el.find('.snippet, .summary, p').first().text().trim() || null;
+    // Build URL to decision page
+    const url = `${BASE_URL}/decision/${year}/${procType}/${caseNumberText.padStart(4, '0')}`;
 
     // Generate PDF URL
     const pdfUrl = generatePdfUrl(caseNumberNormalized);
 
+    // Build snippet from outcome
+    const snippet = outcome ? `Outcome: ${outcome}` : null;
+
     return {
-      case_number: caseNumberText,
+      case_number: `${year}/${procType}/${caseNumberText}`,
       case_number_normalized: caseNumberNormalized,
-      title: title || `CAS Decision ${caseNumberNormalized}`,
-      sport,
+      title,
+      sport: sport || null,
       procedure_type: procedureType,
       date,
-      parties: { appellant, respondent },
+      parties: {
+        appellant: appellant || null,
+        respondent: respondent || null
+      },
       url,
       pdf_url: pdfUrl,
-      snippet: snippet ? cleanText(snippet).substring(0, 200) : null
+      snippet
     };
   } catch (error) {
     console.error('Error parsing search result:', error);
@@ -124,37 +134,35 @@ export async function searchCasDecisions(input: CasSearchInput): Promise<CasSear
   try {
     const result = await withPage(async (page) => {
       const url = buildSearchUrl(input);
+      // Use Blazor-aware navigation with debug support
+      const debugMode = process.env.DEBUG_SCRAPER === 'true';
       await navigateAndWaitWithBlazor(page, url, {
-        waitForBlazor: true,
+        waitForBlazor: false, // Angular, not Blazor
         contentSelectors: [
-          '.result-item',
-          '.search-result',
-          '[class*="result"]',
-          '.decision-item',
-          'article',
-          'table tbody tr'
+          'table tbody tr.line-wrapped',
+          'table tbody tr',
+          'tr.line-wrapped'
         ],
-        timeout: 30000
+        timeout: 30000,
+        debug: debugMode
       });
 
       // Get the rendered HTML
       const html = await page.content();
       const $ = cheerio.load(html);
 
-      // Parse results - try multiple selectors for robustness
+      // Parse results from Angular table structure
+      // Site uses Angular 18 with table rows having class 'line-wrapped'
       const results: CasSearchResult[] = [];
-      
-      // Try various result container selectors
-      const selectors = [
-        '.result-item',
-        '.search-result',
-        '[class*="result"]',
-        '.decision-item',
-        'article',
-        'li[class*="case"]'
+
+      // Primary selector for Angular table rows
+      const tableSelectors = [
+        'table tbody tr.line-wrapped',
+        'table tbody tr',
+        'tr.line-wrapped'
       ];
 
-      for (const selector of selectors) {
+      for (const selector of tableSelectors) {
         const elements = $(selector);
         if (elements.length > 0) {
           elements.each((_, el) => {
@@ -240,6 +248,8 @@ export async function getAwardDetails(
         return { found: false, award: null, error: 'No URL or case number provided' };
       }
 
+      // Use Blazor-aware navigation with debug support
+      const debugMode = process.env.DEBUG_SCRAPER === 'true';
       await navigateAndWaitWithBlazor(page, targetUrl, {
         waitForBlazor: true,
         contentSelectors: [
@@ -250,7 +260,8 @@ export async function getAwardDetails(
           '[class*="award"]',
           '.title'
         ],
-        timeout: 30000
+        timeout: 30000,
+        debug: debugMode
       });
       const html = await page.content();
       const $ = cheerio.load(html);

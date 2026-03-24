@@ -9,7 +9,6 @@ import type { CasRecentOutput, CasRecentDecision } from '../types.js';
 import { normalizeCaseNumber, generatePdfUrl, cleanText } from '../utils.js';
 import { recentCache } from '../infrastructure/cache.js';
 import { tasCasRateLimiter } from '../infrastructure/rate-limiter.js';
-import { fetchText } from '../infrastructure/http-client.js';
 
 const RECENT_URL = 'https://www.tas-cas.org/en/jurisprudence/recent-decisions.html';
 
@@ -70,62 +69,11 @@ function parseRecentDecision($: cheerio.CheerioAPI, element: AnyNode): CasRecent
 
 /**
  * Get recent CAS decisions
- * Uses simpler HTML page that doesn't require JavaScript
+ * Always uses Playwright since TAS-CAS site uses Blazor rendering
  */
 export async function getRecentDecisions(limit: number = 10): Promise<CasRecentOutput> {
-  // Check cache first (5 min TTL)
-  const cacheKey = `recent:${limit}`;
-  const cached = recentCache.get(cacheKey);
-  if (cached) {
-    return cached as CasRecentOutput;
-  }
-
-  // Wait for rate limiter
-  await tasCasRateLimiter.waitForSlot();
-
-  try {
-    const html = await fetchText(RECENT_URL);
-    const $ = cheerio.load(html);
-
-    const decisions: CasRecentDecision[] = [];
-
-    // Try various selectors for recent decisions
-    const selectors = [
-      '.decision-item',
-      '.recent-decision',
-      'article',
-      'li',
-      '.content a',
-      'table tr'
-    ];
-
-    for (const selector of selectors) {
-      const elements = $(selector);
-      if (elements.length > 0) {
-        elements.each((_, el) => {
-          if (decisions.length < limit) {
-            const parsed = parseRecentDecision($, el);
-            if (parsed && !decisions.find(d => d.case_number_normalized === parsed.case_number_normalized)) {
-              decisions.push(parsed);
-            }
-          }
-        });
-        if (decisions.length >= limit) break;
-      }
-    }
-
-    const result: CasRecentOutput = {
-      decisions: decisions.slice(0, limit),
-      retrieved_at: new Date().toISOString(),
-      source: RECENT_URL
-    };
-
-    // Cache the result
-    recentCache.set(cacheKey, result);
-    return result;
-  } finally {
-    tasCasRateLimiter.releaseSlot();
-  }
+  // Always use Playwright for Blazor-rendered content
+  return getRecentDecisionsWithPlaywright(limit);
 }
 
 /**
@@ -148,7 +96,8 @@ export async function getRecentDecisionsWithPlaywright(limit: number = 10): Prom
 
   try {
     const result = await withPage(async (page) => {
-      // Use Blazor-aware navigation
+      // Use Blazor-aware navigation with debug support
+      const debugMode = process.env.DEBUG_SCRAPER === 'true';
       await navigateAndWaitWithBlazor(page, RECENT_URL, {
         waitForBlazor: true,
         contentSelectors: [
@@ -159,7 +108,8 @@ export async function getRecentDecisionsWithPlaywright(limit: number = 10): Prom
           '.content a',
           'table tr'
         ],
-        timeout: 30000
+        timeout: 30000,
+        debug: debugMode
       });
 
       const html = await page.content();
