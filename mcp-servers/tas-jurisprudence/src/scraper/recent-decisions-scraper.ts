@@ -1,63 +1,77 @@
 /**
  * TAS/CAS Jurisprudence MCP Server - Recent Decisions Scraper
- * Scrapes the simpler recent decisions page from tas-cas.org
+ * Uses the search API to get recent decisions (old /recent-decisions.html page is now 404)
  */
 
 import * as cheerio from 'cheerio';
 import type { AnyNode } from 'domhandler';
 import type { CasRecentOutput, CasRecentDecision } from '../types.js';
-import { normalizeCaseNumber, generatePdfUrl, cleanText } from '../utils.js';
+import { generatePdfUrl, cleanText } from '../utils.js';
 import { recentCache } from '../infrastructure/cache.js';
 import { tasCasRateLimiter } from '../infrastructure/rate-limiter.js';
+import { withPage, navigateAndWaitWithBlazor } from './playwright-client.js';
 
-const RECENT_URL = 'https://www.tas-cas.org/en/jurisprudence/recent-decisions.html';
+// Use search API with empty query - returns results sorted by date
+const SEARCH_BASE_URL = 'https://jurisprudence.tas-cas.org/search';
 
 /**
- * Parse a recent decision from HTML
+ * Build search URL for recent decisions (empty query, sorted by date)
+ */
+function buildRecentSearchUrl(limit: number): string {
+  const params = new URLSearchParams();
+  params.set('q', ''); // Empty query returns all results
+  params.set('page', '1');
+  params.set('size', String(Math.min(limit, 25))); // API max is 25 per page
+  return `${SEARCH_BASE_URL}?${params.toString()}`;
+}
+
+/**
+ * Parse a search result from Angular table row into RecentDecision format
+ * Table structure: td[0]=Lang, td[1]=Year, td[2]=Type, td[3]=Case#,
+ *                 td[4]=Appellant, td[5]=Respondent, td[6]=Sport,
+ *                 td[7]=Matter, td[8]=Date, td[9]=Outcome
  */
 function parseRecentDecision($: cheerio.CheerioAPI, element: AnyNode): CasRecentDecision | null {
-  const $el = $(element);
-  
+  const $row = $(element);
+
   try {
-    // Find case number in text
-    const text = $el.text();
-    const caseMatch = text.match(/(?:CAS|TAS)?\s*(\d{4}\/[AO]|AD|ADV\/\d+)/i);
-    
-    if (!caseMatch) return null;
+    // Get all table cells
+    const cells = $row.find('td');
+    if (cells.length < 10) return null;
 
-    const caseNumber = caseMatch[0];
-    const normalizedCaseNumber = normalizeCaseNumber(caseNumber);
+    // Extract data from table cells by index
+    const year = $(cells[1]).text().trim();
+    const procType = $(cells[2]).text().trim();
+    const caseNumberText = $(cells[3]).text().trim();
+    const appellant = $(cells[4]).text().trim();
+    const respondent = $(cells[5]).text().trim();
+    const sport = $(cells[6]).text().trim();
+    const date = $(cells[8]).text().trim();
+    // cells[9] = outcome (not used in recent decision format)
 
-    // Extract title (usually in a heading or link)
-    const title = $el.find('a, h3, h4, strong').first().text().trim() || 
-                  $el.text().trim().substring(0, 100);
+    if (!caseNumberText || !year) return null;
 
-    // Extract date
-    const dateMatch = text.match(/(\d{1,2}[\s\/]\w+[\s\/]\d{4}|\d{4}[\-\/]\d{2}[\-\/]\d{2})/);
-    const date = dateMatch ? dateMatch[1] : '';
+    // Build normalized case number: CAS YYYY/A/NNNN
+    const caseNumberNormalized = `CAS ${year}/${procType}/${caseNumberText}`;
+    const caseNumber = `${year}/${procType}/${caseNumberText}`;
 
-    // Extract sport (if mentioned)
-    const sportMatch = text.match(/(?:sport|discipline)[:\s]*([A-Za-z]+)/i);
-    const sport = sportMatch ? sportMatch[1] : null;
+    // Build title from parties
+    const title = appellant && respondent
+      ? `${appellant} v. ${respondent}`
+      : `CAS Decision ${caseNumberNormalized}`;
 
-    // Find PDF link
-    const pdfHref = $el.find('a[href$=".pdf"]').attr('href') || '';
-    const pdfUrl = pdfHref.startsWith('http') ? pdfHref : 
-                   pdfHref ? `https://www.tas-cas.org${pdfHref}` : 
-                   generatePdfUrl(normalizedCaseNumber);
+    // Build URL to decision page
+    const sourceUrl = `https://jurisprudence.tas-cas.org/decision/${year}/${procType}/${caseNumberText.padStart(4, '0')}`;
 
-    // Find source link
-    const sourceHref = $el.find('a').first().attr('href') || '';
-    const sourceUrl = sourceHref.startsWith('http') ? sourceHref : 
-                      sourceHref ? `https://www.tas-cas.org${sourceHref}` : 
-                      `https://jurisprudence.tas-cas.org/`;
+    // Generate PDF URL
+    const pdfUrl = generatePdfUrl(caseNumberNormalized);
 
     return {
       case_number: caseNumber,
-      case_number_normalized: normalizedCaseNumber,
+      case_number_normalized: caseNumberNormalized,
       title: cleanText(title),
       date,
-      sport,
+      sport: sport || null,
       pdf_url: pdfUrl,
       source_url: sourceUrl
     };
@@ -68,24 +82,12 @@ function parseRecentDecision($: cheerio.CheerioAPI, element: AnyNode): CasRecent
 }
 
 /**
- * Get recent CAS decisions
- * Always uses Playwright since TAS-CAS site uses Blazor rendering
+ * Get recent CAS decisions using the search API
+ * The old /recent-decisions.html page no longer exists (404)
  */
 export async function getRecentDecisions(limit: number = 10): Promise<CasRecentOutput> {
-  // Always use Playwright for Blazor-rendered content
-  return getRecentDecisionsWithPlaywright(limit);
-}
-
-/**
- * Alternative: Scrape recent decisions using Playwright for JavaScript-rendered content
- * Use this if the simple fetch doesn't return results
- */
-export async function getRecentDecisionsWithPlaywright(limit: number = 10): Promise<CasRecentOutput> {
-  // Import dynamically to avoid circular dependencies
-  const { withPage, navigateAndWaitWithBlazor } = await import('./playwright-client.js');
-
-  // Check cache first
-  const cacheKey = `recent:pw:${limit}`;
+  // Check cache first (5 min TTL)
+  const cacheKey = `recent:${limit}`;
   const cached = recentCache.get(cacheKey);
   if (cached) {
     return cached as CasRecentOutput;
@@ -96,17 +98,16 @@ export async function getRecentDecisionsWithPlaywright(limit: number = 10): Prom
 
   try {
     const result = await withPage(async (page) => {
-      // Use Blazor-aware navigation with debug support
+      const url = buildRecentSearchUrl(limit);
+
+      // Use Blazor-aware navigation (actually Angular, but same pattern)
       const debugMode = process.env.DEBUG_SCRAPER === 'true';
-      await navigateAndWaitWithBlazor(page, RECENT_URL, {
-        waitForBlazor: true,
+      await navigateAndWaitWithBlazor(page, url, {
+        waitForBlazor: false, // Angular, not Blazor
         contentSelectors: [
-          '.decision-item',
-          '.recent-decision',
-          'article',
-          'li',
-          '.content a',
-          'table tr'
+          'table tbody tr.line-wrapped',
+          'table tbody tr',
+          'tr.line-wrapped'
         ],
         timeout: 30000,
         debug: debugMode
@@ -117,25 +118,32 @@ export async function getRecentDecisionsWithPlaywright(limit: number = 10): Prom
 
       const decisions: CasRecentDecision[] = [];
 
-      // Parse with same selectors
-      const selectors = ['.decision-item', '.recent-decision', 'article', 'li', '.content a'];
-      
-      for (const selector of selectors) {
-        $(selector).each((_, el) => {
-          if (decisions.length < limit) {
-            const parsed = parseRecentDecision($, el);
-            if (parsed && !decisions.find(d => d.case_number_normalized === parsed.case_number_normalized)) {
-              decisions.push(parsed);
+      // Parse results from Angular table structure
+      const tableSelectors = [
+        'table tbody tr.line-wrapped',
+        'table tbody tr',
+        'tr.line-wrapped'
+      ];
+
+      for (const selector of tableSelectors) {
+        const elements = $(selector);
+        if (elements.length > 0) {
+          elements.each((_, el) => {
+            if (decisions.length < limit) {
+              const parsed = parseRecentDecision($, el);
+              if (parsed && !decisions.find(d => d.case_number_normalized === parsed.case_number_normalized)) {
+                decisions.push(parsed);
+              }
             }
-          }
-        });
-        if (decisions.length >= limit) break;
+          });
+          if (decisions.length > 0) break;
+        }
       }
 
       return {
         decisions: decisions.slice(0, limit),
         retrieved_at: new Date().toISOString(),
-        source: RECENT_URL
+        source: url
       };
     });
 
@@ -145,3 +153,9 @@ export async function getRecentDecisionsWithPlaywright(limit: number = 10): Prom
     tasCasRateLimiter.releaseSlot();
   }
 }
+
+/**
+ * Legacy function name for backwards compatibility
+ * @deprecated Use getRecentDecisions instead
+ */
+export const getRecentDecisionsWithPlaywright = getRecentDecisions;
