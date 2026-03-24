@@ -15,7 +15,7 @@ import type {
 import { normalizeCaseNumber, parseCaseNumber, generatePdfUrl, cleanText } from '../utils.js';
 import { searchCache, awardCache } from '../infrastructure/cache.js';
 import { jurisprudenceRateLimiter } from '../infrastructure/rate-limiter.js';
-import { navigateAndWait, withPage } from './playwright-client.js';
+import { navigateAndWaitWithBlazor, withPage } from './playwright-client.js';
 
 const BASE_URL = 'https://jurisprudence.tas-cas.org';
 
@@ -124,7 +124,18 @@ export async function searchCasDecisions(input: CasSearchInput): Promise<CasSear
   try {
     const result = await withPage(async (page) => {
       const url = buildSearchUrl(input);
-      await navigateAndWait(page, url, 'networkidle');
+      await navigateAndWaitWithBlazor(page, url, {
+        waitForBlazor: true,
+        contentSelectors: [
+          '.result-item',
+          '.search-result',
+          '[class*="result"]',
+          '.decision-item',
+          'article',
+          'table tbody tr'
+        ],
+        timeout: 30000
+      });
 
       // Get the rendered HTML
       const html = await page.content();
@@ -229,7 +240,18 @@ export async function getAwardDetails(
         return { found: false, award: null, error: 'No URL or case number provided' };
       }
 
-      await navigateAndWait(page, targetUrl, 'networkidle');
+      await navigateAndWaitWithBlazor(page, targetUrl, {
+        waitForBlazor: true,
+        contentSelectors: [
+          '.case-number',
+          'h1',
+          '[class*="case"]',
+          '.details',
+          '[class*="award"]',
+          '.title'
+        ],
+        timeout: 30000
+      });
       const html = await page.content();
       const $ = cheerio.load(html);
 

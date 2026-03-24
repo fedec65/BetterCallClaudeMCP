@@ -134,7 +134,7 @@ export async function getRecentDecisions(limit: number = 10): Promise<CasRecentO
  */
 export async function getRecentDecisionsWithPlaywright(limit: number = 10): Promise<CasRecentOutput> {
   // Import dynamically to avoid circular dependencies
-  const { withPage, navigateAndWait } = await import('./playwright-client.js');
+  const { withPage, navigateAndWaitWithBlazor } = await import('./playwright-client.js');
 
   // Check cache first
   const cacheKey = `recent:pw:${limit}`;
@@ -148,7 +148,20 @@ export async function getRecentDecisionsWithPlaywright(limit: number = 10): Prom
 
   try {
     const result = await withPage(async (page) => {
-      await navigateAndWait(page, RECENT_URL, 'networkidle');
+      // Use Blazor-aware navigation
+      await navigateAndWaitWithBlazor(page, RECENT_URL, {
+        waitForBlazor: true,
+        contentSelectors: [
+          '.decision-item',
+          '.recent-decision',
+          'article',
+          'li',
+          '.content a',
+          'table tr'
+        ],
+        timeout: 30000
+      });
+
       const html = await page.content();
       const $ = cheerio.load(html);
 
