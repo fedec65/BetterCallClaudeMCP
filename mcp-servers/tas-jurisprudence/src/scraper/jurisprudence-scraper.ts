@@ -208,7 +208,8 @@ export async function searchCasDecisions(input: CasSearchInput): Promise<CasSear
 }
 
 /**
- * Get detailed award information
+ * Get detailed award information using search-first approach
+ * The site uses ?details=UUID query parameter, not /decision/ routes
  */
 export async function getAwardDetails(
   caseNumber?: string,
@@ -237,101 +238,179 @@ export async function getAwardDetails(
 
   try {
     const result = await withPage(async (page) => {
-      // Build URL
-      let targetUrl = url;
-      if (!targetUrl && normalizedCaseNumber) {
-        const parsed = parseCaseNumber(normalizedCaseNumber);
-        targetUrl = `${BASE_URL}/decision/${parsed.year}/${parsed.type}/${String(parsed.number).padStart(4, '0')}`;
-      }
+      let targetUrl: string;
+      let finalCaseNumber = normalizedCaseNumber;
 
-      if (!targetUrl) {
+      // If URL provided directly, use it
+      if (url) {
+        targetUrl = url;
+      } else if (normalizedCaseNumber) {
+        // Search-first approach: find the decision UUID by searching for the case number
+        const parsed = parseCaseNumber(normalizedCaseNumber);
+
+        // Build search URL for this specific case number
+        const searchParams = new URLSearchParams();
+        searchParams.set('q', normalizedCaseNumber); // Search by full case number
+        searchParams.set('page', '1');
+        searchParams.set('size', '10');
+        const searchUrl = `${BASE_URL}?${searchParams.toString()}`;
+
+        const debugMode = process.env.DEBUG_SCRAPER === 'true';
+
+        // Navigate to search page
+        await navigateAndWaitWithBlazor(page, searchUrl, {
+          waitForBlazor: true,
+          contentSelectors: ['table tbody tr', 'tr.line-wrapped'],
+          timeout: 30000,
+          debug: debugMode
+        });
+
+        // Get search results to find the UUID
+        const searchHtml = await page.content();
+        const $search = cheerio.load(searchHtml);
+
+        // Find the matching row in search results
+        let foundUuid: string | null = null;
+        const targetCaseNum = String(parsed.number).padStart(4, '0');
+
+        $search('table tbody tr').each((_, row) => {
+          if (foundUuid) return; // Already found, skip remaining iterations
+          const cells = $search(row).find('td');
+          if (cells.length >= 4) {
+            const rowYear = $search(cells[1]).text().trim();
+            const rowType = $search(cells[2]).text().trim();
+            const rowNum = $search(cells[3]).text().trim().padStart(4, '0');
+
+            // Check if this row matches our case
+            if (rowYear === String(parsed.year) && rowType === parsed.type && rowNum === targetCaseNum) {
+              // Mark as found, will click below
+              foundUuid = 'found';
+            }
+          }
+        });
+
+        if (!foundUuid) {
+          return { found: false, award: null, error: 'Case not found in search results' };
+        }
+
+        // Click the matching row to open details panel
+        await page.click('table tbody tr:first-child');
+        await page.waitForTimeout(3000); // Wait for details panel to appear
+
+        // Get the current URL which should now have ?details=UUID
+        targetUrl = page.url();
+      } else {
         return { found: false, award: null, error: 'No URL or case number provided' };
       }
 
-      // Use Blazor-aware navigation with debug support
-      const debugMode = process.env.DEBUG_SCRAPER === 'true';
-      await navigateAndWaitWithBlazor(page, targetUrl, {
-        waitForBlazor: true,
-        contentSelectors: [
-          '.case-number',
-          'h1',
-          '[class*="case"]',
-          '.details',
-          '[class*="award"]',
-          '.title'
-        ],
-        timeout: 30000,
-        debug: debugMode
-      });
+      // Get the page content after details panel is loaded
       const html = await page.content();
       const $ = cheerio.load(html);
 
-      // Check if we found the award
-      const notFound = $('body').text().toLowerCase().includes('not found') ||
-                       $('body').text().toLowerCase().includes('no result');
-      
-      if (notFound) {
-        return { found: false, award: null };
+      // Check if details panel is present
+      const detailsCard = $('app-detailed-outcome-card');
+      if (detailsCard.length === 0) {
+        return { found: false, award: null, error: 'Details panel not found' };
       }
 
-      // Extract case number from page
-      const caseNumFromPage = $('.case-number, h1, [class*="case"]').first().text().trim();
-      const finalCaseNumber = normalizedCaseNumber || (caseNumFromPage ? normalizeCaseNumber(caseNumFromPage) : 'Unknown');
+      // Extract case number from title
+      const caseNumFromPage = detailsCard.find('.title h2').first().text().trim();
+      if (caseNumFromPage && !finalCaseNumber) {
+        try {
+          finalCaseNumber = normalizeCaseNumber(caseNumFromPage);
+        } catch {
+          finalCaseNumber = caseNumFromPage;
+        }
+      }
 
-      // Extract details
-      const title = $('h1, .title').first().text().trim();
-      const sport = $('.sport, [class*="sport"]').first().text().trim() || null;
-      const date = $('.date, [class*="date"]').first().text().trim();
+      // Extract sport from keyword component
+      const sport = detailsCard.find('.sport app-keyword .keyword span').first().text().trim() || null;
 
-      // Extract parties
-      const appellant = $('.appellant, [class*="appellant"]').first().text().trim() || null;
-      const respondent = $('.respondent, [class*="respondent"]').first().text().trim() || null;
+      // Extract date
+      const date = detailsCard.find('.date strong').first().text().trim();
 
-      // Extract procedure type
-      const typeText = $('.type, [class*="procedure"]').first().text().trim();
-      const procedureType = mapProcedureType(typeText);
+      // Extract parties from party-container sections
+      let appellant: string | null = null;
+      let respondent: string | null = null;
+
+      detailsCard.find('.info .party-container').each((_, container) => {
+        const label = $(container).find('.info-title').text().trim().toLowerCase();
+        const entries = $(container).find('.party-entry').map((_, entry) => $(entry).text().trim()).get();
+        const partyText = entries.join(', ');
+
+        if (label.includes('appellant')) {
+          appellant = partyText || null;
+        } else if (label.includes('respondent')) {
+          respondent = partyText || null;
+        }
+      });
+
+      // Extract procedure type from the case number (A = Appeal, O = Ordinary, AD = Anti-Doping)
+      let procedureType: 'Appeal' | 'Ordinary' | 'Anti-Doping' | 'Advisory' | null = null;
+      if (finalCaseNumber) {
+        const parsed = parseCaseNumber(finalCaseNumber);
+        procedureType = mapProcedureType(parsed.type);
+      }
 
       // Extract arbitrators
       const arbitrators: CasAwardDetails['arbitrators'] = [];
-      $('.arbitrator, [class*="arbitrator"]').each((_, el) => {
-        const name = $(el).text().trim();
-        const isPresident = name.toLowerCase().includes('president');
-        arbitrators.push({
-          name: name.replace(/president[:\s]*/i, '').trim(),
-          role: isPresident ? 'President' : 'Arbitrator'
-        });
+      detailsCard.find('.info .party-container').each((_, container) => {
+        const label = $(container).find('.info-title').text().trim().toLowerCase();
+        if (label.includes('arbitrator')) {
+          $(container).find('.party-entry').each((_, entry) => {
+            const name = $(entry).text().trim();
+            const isPresident = name.toLowerCase().includes('president') ||
+                               label.includes('president');
+            if (name) {
+              arbitrators.push({
+                name: name.replace(/president[:\s]*/i, '').trim(),
+                role: isPresident ? 'President' : 'Arbitrator'
+              });
+            }
+          });
+        }
       });
 
-      // Extract keywords
+      // Extract keywords (sport is already extracted, look for other keywords)
       const keywords: string[] = [];
-      $('.keyword, [class*="keyword"], .tag').each((_, el) => {
+      if (sport) keywords.push(sport);
+
+      // Look for additional keywords in the card
+      detailsCard.find('.keyword span, app-keyword .keyword span').each((_, el) => {
         const keyword = $(el).text().trim();
-        if (keyword) keywords.push(keyword);
+        if (keyword && !keywords.includes(keyword)) {
+          keywords.push(keyword);
+        }
       });
 
-      // Extract operative part
-      const operativePart = $('.operative-part, [class*="operative"], .decision').first().text().trim() || null;
+      // Extract operative part / decision summary
+      const operativePart = detailsCard.find('[class*="operative"], [class*="decision"]').first().text().trim() || null;
 
-      // Extract summary
-      const summary = $('.summary, [class*="summary"]').first().text().trim() || null;
+      // Extract summary if available
+      const summary = detailsCard.find('.summary, [class*="summary"]').first().text().trim() || null;
+
+      // Build title from parties
+      const title = appellant && respondent
+        ? `${appellant} v. ${respondent}`
+        : `CAS Decision ${finalCaseNumber}`;
 
       // Generate PDF URL
-      const pdfUrl = generatePdfUrl(finalCaseNumber);
+      const pdfUrl = finalCaseNumber ? generatePdfUrl(finalCaseNumber) : null;
 
       const award: CasAwardDetails = {
-        case_number: caseNumFromPage || finalCaseNumber,
-        case_number_normalized: finalCaseNumber,
-        title: title || `CAS Decision ${finalCaseNumber}`,
+        case_number: caseNumFromPage || finalCaseNumber || 'Unknown',
+        case_number_normalized: finalCaseNumber || 'Unknown',
+        title,
         sport,
-        procedure_type: procedureType,
+        procedure_type: procedureType || 'Appeal',
         date,
         parties: { appellant, respondent },
         arbitrators,
-        keywords,
+        keywords: keywords.length > 0 ? keywords : [],
         operative_part: operativePart ? cleanText(operativePart) : null,
         summary: summary ? cleanText(summary) : null,
         full_text: includeFullText ? 'Full text extraction requires PDF parsing - not implemented in this version' : null,
-        pdf_url: pdfUrl,
+        pdf_url: pdfUrl || '',
         source_url: targetUrl
       };
 
