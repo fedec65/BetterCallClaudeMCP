@@ -253,7 +253,7 @@ export async function getAwardDetails(
         searchParams.set('q', normalizedCaseNumber); // Search by full case number
         searchParams.set('page', '1');
         searchParams.set('size', '10');
-        const searchUrl = `${BASE_URL}?${searchParams.toString()}`;
+        const searchUrl = `${BASE_URL}/search?${searchParams.toString()}`;
 
         const debugMode = process.env.DEBUG_SCRAPER === 'true';
 
