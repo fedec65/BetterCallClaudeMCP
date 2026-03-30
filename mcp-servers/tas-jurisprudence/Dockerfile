@@ -16,10 +16,13 @@ ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 # Install dependencies (skip Playwright browser download since image has them)
 RUN npm ci --only=production
 
-# Remove any npm-downloaded browsers and symlink to Docker image browsers
-# This ensures Playwright uses the pre-installed browsers from the image
+# Remove npm-downloaded browsers and create proper directory structure
+# npm expects chromium_headless_shell-1208 but Docker image has chromium-1091
+# Create the expected directory structure and symlink to actual browsers
 RUN rm -rf /root/.cache/ms-playwright && \
-    ln -s /ms-playwright /root/.cache/ms-playwright
+    mkdir -p /root/.cache/ms-playwright && \
+    ln -s /ms-playwright/chromium-1091/chrome-linux /root/.cache/ms-playwright/chromium-1091 && \
+    ln -s /ms-playwright/chromium-1091/chrome-linux /root/.cache/ms-playwright/chromium_headless_shell-1208
 
 # Copy built application
 COPY dist ./dist
