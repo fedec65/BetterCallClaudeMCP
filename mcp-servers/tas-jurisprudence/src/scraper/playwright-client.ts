@@ -126,8 +126,13 @@ export class PlaywrightClient {
    */
   async getBrowser(): Promise<Browser> {
     if (!this.browser || !this.browser.isConnected()) {
+      // Use Docker image's pre-installed chromium if available
+      const executablePath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH ||
+        '/ms-playwright/chromium-1091/chrome-linux/chrome';
+
       this.browser = await chromium.launch({
         headless: this.config.headless,
+        executablePath,
         args: [
           '--no-sandbox',
           '--disable-setuid-sandbox',
