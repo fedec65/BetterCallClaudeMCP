@@ -1,6 +1,6 @@
 {
   "name": "tas-jurisprudence",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "TAS/CAS (Court of Arbitration for Sport) Jurisprudence MCP Server",
   "type": "module",
   "main": "dist/index.js",
