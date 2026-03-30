@@ -6,7 +6,11 @@ WORKDIR /app
 # Copy package files
 COPY package*.json ./
 
-# Install dependencies
+# Tell Playwright to use browsers pre-installed in the Docker image
+# Setting to "0" means use system-installed browsers from the image
+ENV PLAYWRIGHT_BROWSERS_PATH=0
+
+# Install dependencies (skip Playwright browser download since image has them)
 RUN npm ci --only=production
 
 # Copy built application
