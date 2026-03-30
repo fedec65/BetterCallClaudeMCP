@@ -16,6 +16,11 @@ ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 # Install dependencies (skip Playwright browser download since image has them)
 RUN npm ci --only=production
 
+# Remove any npm-downloaded browsers and symlink to Docker image browsers
+# This ensures Playwright uses the pre-installed browsers from the image
+RUN rm -rf /root/.cache/ms-playwright && \
+    ln -s /ms-playwright /root/.cache/ms-playwright
+
 # Copy built application
 COPY dist ./dist
 
