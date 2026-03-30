@@ -130,6 +130,11 @@ export class PlaywrightClient {
       const executablePath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH ||
         '/ms-playwright/chromium-1091/chrome-linux/chrome';
 
+      // Debug logging for Railway deployment
+      console.log('[Playwright] Launching browser with executablePath:', executablePath);
+      console.log('[Playwright] env PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH:', process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH);
+      console.log('[Playwright] File exists at path:', require('fs').existsSync(executablePath));
+
       this.browser = await chromium.launch({
         headless: this.config.headless,
         executablePath,

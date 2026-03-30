@@ -19,7 +19,7 @@ app.get('/health', (_req: Request, res: Response) => {
   res.json({
     status: 'ok',
     service: 'tas-jurisprudence',
-    version: '1.0.0',
+    version: '1.0.2',
     timestamp: new Date().toISOString()
   });
 });
@@ -30,7 +30,7 @@ app.get('/health', (_req: Request, res: Response) => {
 app.get('/', (_req: Request, res: Response) => {
   res.json({
     name: 'TAS/CAS Jurisprudence MCP Server',
-    version: '1.0.0',
+    version: '1.0.2',
     description: 'Court of Arbitration for Sport decision search and retrieval',
     mcp_endpoint: '/tas-jurisprudence/mcp',
     tools: [
@@ -194,6 +194,19 @@ app.listen(PORT, () => {
   console.log(`TAS/CAS Jurisprudence MCP Server running on port ${PORT}`);
   console.log(`MCP endpoint: http://localhost:${PORT}/tas-jurisprudence/mcp`);
   console.log(`Health check: http://localhost:${PORT}/health`);
+
+  // Debug: Check Playwright browser availability at startup
+  const fs = require('fs');
+  const expectedBrowserPath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH ||
+    '/ms-playwright/chromium-1091/chrome-linux/chrome';
+  console.log(`[Startup] Expected browser path: ${expectedBrowserPath}`);
+  console.log(`[Startup] Browser exists: ${fs.existsSync(expectedBrowserPath)}`);
+
+  // List available browsers in /ms-playwright if it exists
+  if (fs.existsSync('/ms-playwright')) {
+    const browsers = fs.readdirSync('/ms-playwright');
+    console.log(`[Startup] Available browsers in /ms-playwright: ${browsers.join(', ')}`);
+  }
 });
 
 // Graceful shutdown
