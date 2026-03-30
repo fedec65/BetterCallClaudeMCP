@@ -10,6 +10,9 @@ COPY package*.json ./
 # Setting to "0" means use system-installed browsers from the image
 ENV PLAYWRIGHT_BROWSERS_PATH=0
 
+# Skip Playwright's browser download during npm install - use Docker image browsers
+ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+
 # Install dependencies (skip Playwright browser download since image has them)
 RUN npm ci --only=production
 
