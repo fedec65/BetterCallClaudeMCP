@@ -1,5 +1,12 @@
-# Ignore everything by default
-*
+# Ignore everything at root level (files only)
+/*
 
-# Only include the tas-jurisprudence subdirectory
+# Allow mcp-servers directory
+!/mcp-servers/
+
+# Ignore other MCP servers
+/mcp-servers/*
 !/mcp-servers/tas-jurisprudence/
+
+# Allow all contents of tas-jurisprudence
+!/mcp-servers/tas-jurisprudence/**
