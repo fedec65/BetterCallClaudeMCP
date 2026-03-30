@@ -19,7 +19,7 @@ app.get('/health', (_req: Request, res: Response) => {
   res.json({
     status: 'ok',
     service: 'tas-jurisprudence',
-    version: '1.0.2',
+    version: '1.0.3',
     timestamp: new Date().toISOString()
   });
 });
@@ -30,7 +30,7 @@ app.get('/health', (_req: Request, res: Response) => {
 app.get('/', (_req: Request, res: Response) => {
   res.json({
     name: 'TAS/CAS Jurisprudence MCP Server',
-    version: '1.0.2',
+    version: '1.0.3',
     description: 'Court of Arbitration for Sport decision search and retrieval',
     mcp_endpoint: '/tas-jurisprudence/mcp',
     tools: [
@@ -64,7 +64,7 @@ app.post('/tas-jurisprudence/mcp', async (req: Request, res: Response) => {
         },
         serverInfo: {
           name: 'tas-jurisprudence',
-          version: '1.0.0'
+          version: '1.0.2'
         }
       };
       

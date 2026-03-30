@@ -1,5 +1,5 @@
 # Simple Dockerfile using official Playwright image
-# v1.0.2 - Added debug logging for browser path
+# v1.0.3 - Force Railway rebuild - Playwright browser fix
 FROM mcr.microsoft.com/playwright:v1.40.0-jammy
 
 WORKDIR /app
