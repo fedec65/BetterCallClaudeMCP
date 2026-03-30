@@ -64,7 +64,7 @@ app.post('/tas-jurisprudence/mcp', async (req: Request, res: Response) => {
         },
         serverInfo: {
           name: 'tas-jurisprudence',
-          version: '1.0.2'
+          version: '1.0.3'
         }
       };
       
