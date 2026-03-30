@@ -7,8 +7,8 @@ WORKDIR /app
 COPY package*.json ./
 
 # Tell Playwright to use browsers pre-installed in the Docker image
-# Setting to "0" means use system-installed browsers from the image
-ENV PLAYWRIGHT_BROWSERS_PATH=0
+# The official Playwright Docker image installs browsers to /ms-playwright/
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright/
 
 # Skip Playwright's browser download during npm install - use Docker image browsers
 ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
