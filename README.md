@@ -4,60 +4,103 @@
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow.svg)](LICENSE)
 [![MCP](https://img.shields.io/badge/MCP-Compatible-green.svg)](https://modelcontextprotocol.io)
-[![Node](https://img.shields.io/badge/node-%3E%3D18-blue.svg)](https://nodejs.org)
+[![Node](https://img.shields.io/badge/node-%3E%3D20-blue.svg)](https://nodejs.org)
 
-This repository contains the standalone MCP servers that power the
-[BetterCallClaude](https://github.com/fedec65/bettercallclaude) Swiss legal
-intelligence plugin. Each server is a separate, independently-installable
-package.
+This repository is the **single source of truth** for the Swiss-legal Model
+Context Protocol (MCP) servers that power the
+[BetterCallClaude](https://github.com/fedec65/bettercallclaude) plugin.
+It contains:
 
-> This repo is **MCP-only**. Slash commands, skills, agents, hooks, and the
-> Cowork plugin manifest live in
+- **Seven MCP servers** (see [Servers](#servers)), each a self-contained
+  workspace package under `mcp-servers/`.
+- A **single HTTP aggregator** (`mcp-servers-http/`) that exposes all seven
+  servers over Streamable HTTP on a single Node.js Express process.
+- A production deployment at
+  **[`mcp.bettercallclaude.ch`](https://mcp.bettercallclaude.ch/health)**
+  (Railway, auto-deployed from `main`).
+
+> This repo is **MCP-only**. Slash commands, skills, agents, hooks, the
+> `.mcp.json` config, and the Cowork plugin manifest live in
 > [`fedec65/bettercallclaude`](https://github.com/fedec65/bettercallclaude).
 
 ## Servers
 
-| Server | Transport | Purpose |
+| Server | Tools | Purpose |
 |---|---|---|
-| [`bge-search`](mcp-servers/bge-search) | stdio | Swiss Federal Supreme Court (BGE/ATF/DTF) decision search |
-| [`entscheidsuche`](mcp-servers/entscheidsuche) | stdio | Federal + cantonal court decision search via entscheidsuche.ch |
-| [`legal-citations`](mcp-servers/legal-citations) | stdio | Validate, parse, format, and convert Swiss legal citations |
-| [`legal-persona`](mcp-servers/legal-persona) | stdio | Case strategy, drafting, and document analysis tools |
-| [`tas-jurisprudence`](mcp-servers/tas-jurisprudence) | HTTP (Streamable) | TAS/CAS (Court of Arbitration for Sport) decision search |
+| [`bge-search`](mcp-servers/bge-search) | 3 | Swiss Federal Supreme Court (BGE/ATF/DTF) decision search |
+| [`entscheidsuche`](mcp-servers/entscheidsuche) | 6 | Federal + cantonal court decision search via [entscheidsuche.ch](https://entscheidsuche.ch) |
+| [`fedlex-sparql`](mcp-servers/fedlex-sparql) | 5 | Swiss federal legislation via the [Fedlex](https://fedlex.data.admin.ch) SPARQL endpoint |
+| [`legal-citations`](mcp-servers/legal-citations) | 8 | Validate, parse, format, convert and extract Swiss legal citations |
+| [`onlinekommentar`](mcp-servers/onlinekommentar) | 4 | Scholarly commentaries from [onlinekommentar.ch](https://onlinekommentar.ch) |
+| [`legal-persona`](mcp-servers/legal-persona) | 3 | Case strategy, Swiss-legal document drafting (15 doc types), and document analysis |
+| [`tas-jurisprudence`](mcp-servers/tas-jurisprudence) | 4 | TAS/CAS (Court of Arbitration for Sport) decision search |
 
-See [`docs/07-MCP-SERVERS-REFERENCE.md`](docs/07-MCP-SERVERS-REFERENCE.md) for
-the full tool reference.
+Every server ships **both** as a stdio MCP (for local use / testing) and as
+an HTTP endpoint through the aggregator. See
+[`docs/07-MCP-SERVERS-REFERENCE.md`](docs/07-MCP-SERVERS-REFERENCE.md) for the
+full tool reference.
 
 ## Repository layout
 
 ```
 mcp-servers/
-├── bge-search/          # stdio MCP server
-├── entscheidsuche/      # stdio MCP server
-├── legal-citations/     # stdio MCP server
-├── legal-persona/       # stdio MCP server
-└── tas-jurisprudence/   # HTTP MCP server (Railway-deployable)
+├── bge-search/           # stdio MCP server + factory for HTTP wiring
+├── entscheidsuche/       # ″
+├── fedlex-sparql/        # ″
+├── legal-citations/      # ″
+├── legal-persona/        # ″
+├── onlinekommentar/      # ″
+├── tas-jurisprudence/    # ″
+├── shared/               # database, HTTP, NLP and error utilities
+└── integration-tests/    # cross-server tests
+
+mcp-servers-http/         # Express app that mounts the 7 servers
+                          # as /<server>/mcp HTTP Streamable endpoints.
+                          # Dockerized and auto-deployed to Railway.
+
+railway.toml              # Railway build config (Dockerfile builder)
 ```
 
-Each directory is a self-contained npm package with its own `package.json`,
-tests, and build. The root `package.json` wires them together as npm
-workspaces so you can build/test all of them in one pass.
+Every `mcp-servers/*` directory is a self-contained npm package. The root
+`package.json` wires them together as **npm workspaces** so you can
+build/test all of them in one pass. Packages are published under the
+`@bettercallclaude/*` scope internally.
+
+## Production deployment
+
+The HTTP aggregator is deployed to Railway and served at
+`https://mcp.bettercallclaude.ch`. Health check:
+
+```bash
+curl -s https://mcp.bettercallclaude.ch/health
+# {"status":"ok","servers":7,"serverNames":["bge-search","entscheidsuche",
+#  "fedlex-sparql","legal-citations","onlinekommentar","legal-persona",
+#  "tas-jurisprudence"], ...}
+```
+
+Each server is reachable at `https://mcp.bettercallclaude.ch/<server>/mcp`
+using the MCP Streamable HTTP transport (protocol `2025-06-18`).
+
+**Merges to `main` auto-redeploy** via the Railway ↔ GitHub integration
+(Dockerfile build from `mcp-servers-http/Dockerfile`). `dev` is the
+integration branch; PRs target `dev` and are promoted to `main` via a
+separate merge PR.
 
 ## Development
 
-Requires Node.js ≥ 18 and npm ≥ 10.
+Requires Node.js ≥ 20 and npm ≥ 10.
 
 ```bash
-# Install dependencies for every server
+# Install dependencies for every workspace
 npm install
 
-# Build all servers
+# Build all servers + the HTTP aggregator
 npm run build
 
-# Run tests across all servers
+# Run tests across all workspaces
 npm test
 
-# Typecheck all servers
+# Typecheck everything
 npm run typecheck
 ```
 
@@ -69,11 +112,60 @@ npm run build
 npm test
 ```
 
+To run the aggregator locally:
+
+```bash
+npm run build --workspaces
+npm --workspace mcp-servers-http run start
+# → listens on :3000, all 7 servers mounted at /<name>/mcp
+```
+
+### Docker (production parity)
+
+```bash
+docker build -f mcp-servers-http/Dockerfile -t bcc-mcp .
+docker run --rm -p 3000:3000 bcc-mcp
+curl -s localhost:3000/health
+```
+
 ## Using the servers with Claude
 
-Point your MCP-capable client at a built server's entry point. Example for
-Claude Desktop (`~/Library/Application Support/Claude/claude_desktop_config.json`
-on macOS, `%APPDATA%\Claude\claude_desktop_config.json` on Windows):
+### Option A — HTTP (recommended, no install required)
+
+Point any MCP-capable client at the deployed Railway endpoints. This is how
+the [`bettercallclaude`](https://github.com/fedec65/bettercallclaude) plugin
+wires itself via its `.mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "bge-search":         { "type": "http", "url": "https://mcp.bettercallclaude.ch/bge-search/mcp" },
+    "entscheidsuche":     { "type": "http", "url": "https://mcp.bettercallclaude.ch/entscheidsuche/mcp" },
+    "fedlex-sparql":      { "type": "http", "url": "https://mcp.bettercallclaude.ch/fedlex-sparql/mcp" },
+    "legal-citations":    { "type": "http", "url": "https://mcp.bettercallclaude.ch/legal-citations/mcp" },
+    "onlinekommentar":    { "type": "http", "url": "https://mcp.bettercallclaude.ch/onlinekommentar/mcp" },
+    "legal-persona":      { "type": "http", "url": "https://mcp.bettercallclaude.ch/legal-persona/mcp" },
+    "tas-jurisprudence":  { "type": "http", "url": "https://mcp.bettercallclaude.ch/tas-jurisprudence/mcp" }
+  }
+}
+```
+
+Verify a server with a raw MCP call:
+
+```bash
+curl -s -X POST https://mcp.bettercallclaude.ch/bge-search/mcp \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -H "mcp-protocol-version: 2025-06-18" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
+```
+
+### Option B — stdio (local, hackable)
+
+Build the workspaces, then point Claude Desktop
+(`~/Library/Application Support/Claude/claude_desktop_config.json` on
+macOS, `%APPDATA%\Claude\claude_desktop_config.json` on Windows) at the
+compiled entry points:
 
 ```json
 {
@@ -82,32 +174,35 @@ on macOS, `%APPDATA%\Claude\claude_desktop_config.json` on Windows):
       "command": "node",
       "args": ["/absolute/path/to/BetterCallClaudeMCP/mcp-servers/bge-search/dist/index.js"]
     },
-    "entscheidsuche": {
-      "command": "node",
-      "args": ["/absolute/path/to/BetterCallClaudeMCP/mcp-servers/entscheidsuche/dist/index.js"]
-    },
-    "legal-citations": {
-      "command": "node",
-      "args": ["/absolute/path/to/BetterCallClaudeMCP/mcp-servers/legal-citations/dist/index.js"]
-    },
     "legal-persona": {
       "command": "node",
       "args": ["/absolute/path/to/BetterCallClaudeMCP/mcp-servers/legal-persona/dist/index.js"]
     }
+    // …one entry per server you want
   }
 }
 ```
 
-`tas-jurisprudence` exposes a Streamable HTTP endpoint and is intended to be
-deployed as a service (see
-[`mcp-servers/tas-jurisprudence/README.md`](mcp-servers/tas-jurisprudence/README.md)).
-
 ### MCP Inspector
 
 ```bash
+# stdio
 npx @modelcontextprotocol/inspector \
   node ./mcp-servers/bge-search/dist/index.js
+
+# HTTP
+npx @modelcontextprotocol/inspector \
+  --transport http \
+  https://mcp.bettercallclaude.ch/bge-search/mcp
 ```
+
+## Contributing
+
+- Branch from `dev`, open a PR against `dev`.
+- Keep changes scoped to a single workspace where possible.
+- Run `npm run build && npm test` before pushing.
+- A merge to `main` triggers a Railway redeploy. Smoke-test `/health`
+  after promotion.
 
 ## License
 
