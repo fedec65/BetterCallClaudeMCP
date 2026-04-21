@@ -2,15 +2,15 @@ import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
   test: {
-    globals: true,
-    environment: 'node',
-  },
-  resolve: {
-    alias: {
-      // Allow .js imports to resolve to .ts files
-    },
-  },
-  esbuild: {
-    target: 'node18',
-  },
+    coverage: {
+      provider: 'v8',
+      reporter: ['text', 'json', 'html'],
+      exclude: [
+        'node_modules/',
+        'dist/',
+        '**/*.test.ts',
+        '**/*.config.ts'
+      ]
+    }
+  }
 });
