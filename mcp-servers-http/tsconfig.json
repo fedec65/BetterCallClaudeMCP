@@ -1,0 +1,38 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "lib": ["ES2022"],
+    "outDir": "./dist",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "declaration": false,
+    "sourceMap": true,
+    "paths": {
+      "@legal-citations/*": ["../mcp-servers/legal-citations/src/*"],
+      "@onlinekommentar/*": ["../mcp-servers/onlinekommentar/src/*"],
+      "@fedlex-sparql/*": ["../mcp-servers/fedlex-sparql/src/*"],
+      "@legal-persona/*": ["../mcp-servers/legal-persona/src/*"],
+      "@tas-jurisprudence/*": ["../mcp-servers/tas-jurisprudence/src/*"]
+    }
+  },
+  "include": [
+    "src/**/*.ts",
+    "../mcp-servers/legal-citations/src/**/*.ts",
+    "../mcp-servers/onlinekommentar/src/**/*.ts",
+    "../mcp-servers/fedlex-sparql/src/**/*.ts",
+    "../mcp-servers/legal-persona/src/**/*.ts",
+    "../mcp-servers/tas-jurisprudence/src/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "../mcp-servers/**/node_modules",
+    "../mcp-servers/**/*.test.ts",
+    "../mcp-servers/**/__tests__"
+  ]
+}

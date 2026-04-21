@@ -6,17 +6,22 @@
   "license": "MIT",
   "author": "BetterCallClaude",
   "workspaces": [
+    "mcp-servers/shared",
     "mcp-servers/bge-search",
     "mcp-servers/entscheidsuche",
     "mcp-servers/legal-citations",
+    "mcp-servers/fedlex-sparql",
+    "mcp-servers/onlinekommentar",
+    "mcp-servers/integration-tests",
     "mcp-servers/legal-persona",
-    "mcp-servers/tas-jurisprudence"
+    "mcp-servers/tas-jurisprudence",
+    "mcp-servers-http"
   ],
   "scripts": {
     "build": "npm run build --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
-    "clean": "rm -rf mcp-servers/*/dist mcp-servers/*/node_modules node_modules"
+    "clean": "rm -rf mcp-servers/*/dist mcp-servers/*/node_modules mcp-servers-http/dist mcp-servers-http/node_modules node_modules"
   },
   "engines": {
     "node": ">=18.0.0"

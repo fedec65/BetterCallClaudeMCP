@@ -1,36 +1,28 @@
 {
-  "name": "@bettercallclaude/entscheidsuche-mcp",
-  "version": "1.0.0",
-  "description": "MCP server for searching Swiss court decisions via entscheidsuche.ch",
-  "type": "module",
+  "name": "@bettercallclaude/entscheidsuche",
+  "version": "2.0.0",
+  "description": "MCP server for Swiss federal court decision search (Entscheidsuche)",
   "main": "dist/index.js",
+  "types": "dist/index.d.ts",
   "scripts": {
-    "build": "tsup src/index.ts --format esm --dts --clean",
-    "dev": "tsup src/index.ts --format esm --watch",
-    "start": "node dist/index.js",
-    "typecheck": "tsc --noEmit",
+    "build": "npx tsc",
+    "dev": "npx ts-node src/index.ts",
     "test": "vitest run",
-    "test:run": "vitest run"
+    "lint": "eslint src/",
+    "clean": "rm -rf dist"
   },
   "keywords": [
     "mcp",
-    "entscheidsuche",
     "swiss-law",
+    "entscheidsuche",
     "court-decisions"
   ],
-  "license": "MIT",
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.0.0",
-    "axios": "^1.7.0",
-    "zod": "^3.23.0"
+    "@modelcontextprotocol/sdk": "^1.26.0",
+    "@bettercallclaude/shared": "file:../shared"
   },
   "devDependencies": {
-    "@types/node": "^20.14.0",
-    "tsup": "^8.1.0",
-    "typescript": "^5.5.0",
-    "vitest": "^1.6.0"
-  },
-  "engines": {
-    "node": ">=18.0.0"
+    "@types/node": "^20.10.6",
+    "typescript": "^5.7.2"
   }
 }

@@ -1,0 +1,32 @@
+{
+  "name": "bettercallclaude-mcp-http",
+  "version": "1.0.0",
+  "description": "HTTP MCP server hosting BetterCallClaude's 7 Swiss legal intelligence servers",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "build": "node esbuild.config.mjs",
+    "dev": "tsx --watch src/index.ts",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.27.1",
+    "express": "^5.1.0",
+    "cors": "^2.8.5",
+    "express-rate-limit": "^7.5.0",
+    "axios": "^1.7.9",
+    "playwright": "^1.40.0"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.0",
+    "@types/cors": "^2.8.17",
+    "@types/node": "^22.10.2",
+    "esbuild": "^0.27.3",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  }
+}
