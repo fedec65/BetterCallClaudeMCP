@@ -1,38 +1,28 @@
 {
-  "name": "@bettercallclaude/bge-search-mcp",
-  "version": "1.0.0",
-  "description": "MCP server for searching Swiss Federal Supreme Court (BGE) decisions",
-  "type": "module",
+  "name": "@bettercallclaude/bge-search",
+  "version": "2.0.0",
+  "description": "MCP server for Swiss Federal Supreme Court (BGE) decision search",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
-    "build": "tsc",
-    "dev": "tsc --watch",
-    "test": "vitest",
-    "test:run": "vitest run",
-    "typecheck": "tsc --noEmit",
-    "lint": "eslint src --ext .ts",
+    "build": "npx tsc",
+    "dev": "npx ts-node src/index.ts",
+    "test": "vitest run",
+    "lint": "eslint src/",
     "clean": "rm -rf dist"
   },
   "keywords": [
     "mcp",
     "swiss-law",
     "bge",
-    "federal-court",
-    "legal-research"
+    "federal-supreme-court"
   ],
-  "author": "",
-  "license": "MIT",
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.0.0",
-    "zod": "^3.22.0"
+    "@modelcontextprotocol/sdk": "^1.26.0",
+    "@bettercallclaude/shared": "file:../shared"
   },
   "devDependencies": {
-    "@types/node": "^20.10.0",
-    "typescript": "^5.3.0",
-    "vitest": "^1.0.0"
-  },
-  "engines": {
-    "node": ">=18.0.0"
+    "@types/node": "^20.10.6",
+    "typescript": "^5.7.2"
   }
 }

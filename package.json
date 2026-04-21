@@ -1,54 +1,33 @@
 {
-  "name": "bettercallclaude-mcp",
-  "version": "1.0.0",
-  "description": "Swiss Legal Intelligence Framework - MCP Server for Claude Desktop and Cowork",
-  "type": "module",
-  "main": "dist/index.js",
-  "bin": {
-    "bettercallclaude-mcp": "dist/index.js"
-  },
-  "scripts": {
-    "build": "tsup src/index.ts --format esm --dts --clean",
-    "dev": "tsup src/index.ts --format esm --watch",
-    "start": "node dist/index.js",
-    "typecheck": "tsc --noEmit",
-    "lint": "eslint src --ext .ts",
-    "test": "vitest",
-    "prepublishOnly": "npm run build"
-  },
-  "keywords": [
-    "mcp",
-    "model-context-protocol",
-    "claude",
-    "legal",
-    "swiss-law",
-    "bge",
-    "bundesgericht",
-    "fedlex"
-  ],
-  "author": "BetterCallClaude",
+  "name": "bettercallclaude-mcp-monorepo",
+  "version": "1.1.0",
+  "private": true,
+  "description": "Monorepo of Model Context Protocol (MCP) servers for Swiss legal research — BGE, entscheidsuche, legal citations, legal persona tools, and TAS/CAS jurisprudence.",
   "license": "MIT",
-  "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.0.0",
-    "axios": "^1.7.0",
-    "bottleneck": "^2.19.5",
-    "lru-cache": "^10.4.0",
-    "p-retry": "^6.2.0",
-    "uuid": "^9.0.0",
-    "zod": "^3.23.0"
-  },
-  "devDependencies": {
-    "@types/node": "^20.14.0",
-    "@types/uuid": "^9.0.0",
-    "eslint": "^9.0.0",
-    "tsup": "^8.1.0",
-    "typescript": "^5.5.0",
-    "vitest": "^1.6.0"
+  "author": "BetterCallClaude",
+  "workspaces": [
+    "mcp-servers/shared",
+    "mcp-servers/bge-search",
+    "mcp-servers/entscheidsuche",
+    "mcp-servers/legal-citations",
+    "mcp-servers/fedlex-sparql",
+    "mcp-servers/onlinekommentar",
+    "mcp-servers/integration-tests",
+    "mcp-servers/legal-persona",
+    "mcp-servers/tas-jurisprudence",
+    "mcp-servers-http"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "clean": "rm -rf mcp-servers/*/dist mcp-servers/*/node_modules mcp-servers-http/dist mcp-servers-http/node_modules node_modules"
   },
   "engines": {
     "node": ">=18.0.0"
   },
-  "files": [
-    "dist"
-  ]
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/fedec65/BetterCallClaudeMCP.git"
+  }
 }
