@@ -40,9 +40,9 @@ Persona-based legal analysis tools (strategy, drafting, document analysis).
 
 | Tool | Description |
 |---|---|
-| `legal-persona:legal_strategy` | Produce a case-strategy assessment (strengths, risks, success likelihood, next steps). |
-| `legal-persona:legal_draft` | Draft Swiss legal documents (contracts, briefs, memoranda). |
-| `legal-persona:legal_analyze` | Analyze a legal document for parties, citations, dates, jurisdiction, and issues. |
+| `legal_strategy` | Produce a case-strategy assessment (strengths, risks, success likelihood, next steps). |
+| `legal_draft` | Draft Swiss legal documents (contracts, briefs, memoranda). |
+| `legal_analyze` | Analyze a legal document for parties, citations, dates, jurisdiction, and issues. |
 
 ## 5. `tas-jurisprudence` (HTTP / Streamable)
 
