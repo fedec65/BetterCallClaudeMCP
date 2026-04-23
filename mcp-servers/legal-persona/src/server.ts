@@ -26,7 +26,7 @@ export const SERVER_VERSION = '1.0.0';
 
 export const tools: Tool[] = [
   {
-    name: 'legal-persona:legal_strategy',
+    name: 'legal_strategy',
     description: `Develops comprehensive legal strategy for Swiss law cases.
 
 Analyzes case facts and provides:
@@ -92,7 +92,7 @@ Supports federal and cantonal jurisdictions across all major Swiss legal areas.`
     },
   },
   {
-    name: 'legal-persona:legal_draft',
+    name: 'legal_draft',
     description: `Drafts Swiss legal documents with proper structure and terminology.
 
 Supports document types:
@@ -168,7 +168,7 @@ Output formats:
     },
   },
   {
-    name: 'legal-persona:legal_analyze',
+    name: 'legal_analyze',
     description: `Analyzes legal documents for issues, risks, and compliance.
 
 Analysis capabilities:
@@ -256,7 +256,7 @@ export function createLegalPersonaServer(): Server {
 
     try {
       switch (name) {
-        case 'legal-persona:legal_strategy': {
+        case 'legal_strategy': {
           const input = LegalStrategyInputSchema.parse(args);
           const result = legalStrategy(input);
           return {
@@ -264,7 +264,7 @@ export function createLegalPersonaServer(): Server {
           };
         }
 
-        case 'legal-persona:legal_draft': {
+        case 'legal_draft': {
           const input = LegalDraftInputSchema.parse(args);
           const result = legalDraft(input);
           return {
@@ -272,7 +272,7 @@ export function createLegalPersonaServer(): Server {
           };
         }
 
-        case 'legal-persona:legal_analyze': {
+        case 'legal_analyze': {
           const input = LegalAnalyzeInputSchema.parse(args);
           const result = legalAnalyze(input);
           return {
