@@ -59,24 +59,21 @@ npm run dev
 
 ## Deployment
 
-### Railway
+This server is not deployed standalone. It is mounted as a route on the shared HTTP aggregator in [`mcp-servers-http/`](../../mcp-servers-http/) and deployed alongside the other 6 servers as a single Railway service (`bettercallclaude-mcp`).
 
-This server is designed for Railway deployment with HTTP transport:
+Production endpoint:
 
-```bash
-# From the tas-jurisprudence directory
-railway up
+```
+https://mcp.bettercallclaude.ch/tas-jurisprudence/mcp
 ```
 
-**Configuration:**
-- Set custom domain: `tas.bettercallclaude.ch`
-- MCP endpoint: `https://tas.bettercallclaude.ch/tas-jurisprudence/mcp`
+To modify this server's behaviour in production: open a PR here, merge to `main`, Railway auto-redeploys the aggregator. See the top-level [README](../../README.md) for the full deploy pipeline.
 
 ## Client Configuration
 
 ### Claude Desktop
 
-For local stdio transport (not recommended for this server):
+For local stdio transport (development only):
 ```json
 {
   "mcpServers": {
@@ -88,15 +85,15 @@ For local stdio transport (not recommended for this server):
 }
 ```
 
-### Remote HTTP Transport
+### Remote HTTP Transport (recommended)
 
-For Railway deployment:
+Uses the shared aggregator:
 ```json
 {
   "mcpServers": {
     "tas-jurisprudence": {
-      "url": "https://tas.bettercallclaude.ch/tas-jurisprudence/mcp",
-      "transport": "http"
+      "type": "http",
+      "url": "https://mcp.bettercallclaude.ch/tas-jurisprudence/mcp"
     }
   }
 }
@@ -170,4 +167,4 @@ MIT License - BetterCallClaude Project
 - [CAS/TAS Official Website](https://www.tas-cas.org)
 - [CAS Jurisprudence Database](https://jurisprudence.tas-cas.org)
 - [MCP Specification](https://modelcontextprotocol.io)
-# Railway Deploy
+
