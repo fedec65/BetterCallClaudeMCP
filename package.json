@@ -3,7 +3,7 @@
   "version": "1.1.0",
   "private": true,
   "description": "Monorepo of Model Context Protocol (MCP) servers for Swiss legal research — BGE, entscheidsuche, legal citations, legal persona tools, and TAS/CAS jurisprudence.",
-  "license": "MIT",
+  "license": "AGPL-3.0-or-later",
   "author": "BetterCallClaude",
   "workspaces": [
     "mcp-servers/shared",

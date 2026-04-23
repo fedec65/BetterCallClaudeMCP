@@ -2,7 +2,7 @@
 
 > Model Context Protocol (MCP) servers for Swiss legal research.
 
-[![License: MIT](https://img.shields.io/badge/license-MIT-yellow.svg)](LICENSE)
+[![License: AGPL-3.0-or-later](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue.svg)](LICENSE)
 [![MCP](https://img.shields.io/badge/MCP-Compatible-green.svg)](https://modelcontextprotocol.io)
 [![Node](https://img.shields.io/badge/node-%3E%3D20-blue.svg)](https://nodejs.org)
 
@@ -206,4 +206,14 @@ npx @modelcontextprotocol/inspector \
 
 ## License
 
-MIT
+[GNU Affero General Public License v3.0 or later](LICENSE) (AGPL-3.0-or-later).
+
+The AGPL extends the GPL's copyleft to network use: if you run a modified
+version of this software as a network service (for example, hosting your
+own `mcp-servers-http` aggregator), you must make the corresponding
+modified source code available to users of that service under the same
+licence.
+
+Past commits released under MIT remain available under MIT terms for
+anyone who obtained them before the relicence date; all commits from the
+relicence commit forward are AGPL-3.0-or-later.

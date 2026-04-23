@@ -20,7 +20,7 @@
     "legal-research"
   ],
   "author": "BetterCallClaude",
-  "license": "MIT",
+  "license": "AGPL-3.0-or-later",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
     "cheerio": "^1.0.0",
