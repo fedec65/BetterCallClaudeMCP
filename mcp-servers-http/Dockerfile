@@ -23,13 +23,19 @@ COPY mcp-servers/onlinekommentar/package.json ./mcp-servers/onlinekommentar/
 COPY mcp-servers/tas-jurisprudence/package.json ./mcp-servers/tas-jurisprudence/
 COPY mcp-servers/shared/package.json ./mcp-servers/shared/
 COPY mcp-servers/integration-tests/package.json ./mcp-servers/integration-tests/
+COPY packages/widgets-common/package.json ./packages/widgets-common/
 
 RUN npm ci --ignore-scripts
 
-# Copy sources and build the HTTP aggregator bundle.
+# Copy sources.
 COPY mcp-servers/ ./mcp-servers/
 COPY mcp-servers-http/ ./mcp-servers-http/
+COPY packages/widgets-common/ ./packages/widgets-common/
 
+# Build widgets (generates embedded-widgets.ts consumed by the HTTP aggregator).
+RUN npm run build --workspace=@bettercallclaude/widgets-common
+
+# Build the HTTP aggregator bundle.
 RUN npm run build --workspace=bettercallclaude-mcp-http
 
 # ---- Stage 2: runtime ----
