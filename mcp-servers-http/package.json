@@ -1,6 +1,6 @@
 {
   "name": "bettercallclaude-mcp-http",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "HTTP MCP server hosting BetterCallClaude's 7 Swiss legal intelligence servers",
   "type": "module",
   "private": true,

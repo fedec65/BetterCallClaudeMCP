@@ -5,7 +5,7 @@
   "type": "module",
   "description": "Shared infrastructure for MCP Apps widgets — design system, i18n, helpers",
   "scripts": {
-    "build": "WIDGET=jurisprudence-browser vite build && WIDGET=adversarial-dashboard vite build && node scripts/embed-html.mjs",
+    "build": "WIDGET=jurisprudence-browser vite build && WIDGET=adversarial-dashboard vite build && WIDGET=citation-validation vite build && WIDGET=intake-form vite build && WIDGET=deadline-calculator vite build && node scripts/embed-html.mjs",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
