@@ -30,3 +30,6 @@ coverage/
 tmp/
 temp/
 *.tmp
+
+# Auto-generated widget embeddings
+mcp-servers-http/src/lib/embedded-widgets.ts

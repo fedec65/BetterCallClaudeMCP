@@ -3,15 +3,26 @@
  *
  * Creates a Server instance with all bge-search tool handlers.
  * Uses simplified EntscheidSucheClient (API-only, no database/cache).
+ *
+ * MCP Apps: declares a jurisprudence-browser widget resource and adds
+ * _meta.ui to search tools. Non-MCP-Apps clients ignore the metadata
+ * and receive the text response as before (backward compatible).
  */
 
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
+  ListResourcesRequestSchema,
+  ReadResourceRequestSchema,
+  ListResourceTemplatesRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 
 import { EntscheidSucheClient, type SearchFilters } from '../lib/entscheidsuche-client.js';
+import { jurisprudenceBrowserHtml } from '../lib/embedded-widgets.js';
+
+const RESOURCE_MIME_TYPE = 'text/html;profile=mcp-app';
+const WIDGET_URI = 'ui://bge-search/jurisprudence-browser';
 
 interface SearchParams {
   query: string;
@@ -25,8 +36,8 @@ interface SearchParams {
 
 export function createBgeSearchServer(): Server {
   const server = new Server(
-    { name: 'bge-search', version: '2.0.0' },
-    { capabilities: { tools: {} } }
+    { name: 'bge-search', version: '2.1.0' },
+    { capabilities: { tools: {}, resources: {} } }
   );
 
   const apiClient = new EntscheidSucheClient();
@@ -49,7 +60,44 @@ export function createBgeSearchServer(): Server {
     };
   }
 
-  // --- Tool definitions ---
+  // --- UI Resource handlers (MCP Apps) ---
+
+  server.setRequestHandler(ListResourcesRequestSchema, async () => ({
+    resources: [
+      {
+        uri: WIDGET_URI,
+        name: 'Jurisprudence Browser',
+        description: 'Interactive browser for BGE search results with filters, detail view, and analysis actions.',
+        mimeType: RESOURCE_MIME_TYPE,
+      },
+    ],
+  }));
+
+  server.setRequestHandler(ListResourceTemplatesRequestSchema, async () => ({
+    resourceTemplates: [],
+  }));
+
+  server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
+    if (request.params.uri === WIDGET_URI) {
+      return {
+        contents: [
+          {
+            uri: WIDGET_URI,
+            mimeType: RESOURCE_MIME_TYPE,
+            text: jurisprudenceBrowserHtml,
+          },
+        ],
+      };
+    }
+    throw new Error(`Unknown resource: ${request.params.uri}`);
+  });
+
+  // --- Tool definitions (with _meta.ui for MCP Apps) ---
+
+  const uiMeta = {
+    ui: { resourceUri: WIDGET_URI },
+    'ui/resourceUri': WIDGET_URI,
+  };
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
     tools: [
@@ -57,6 +105,7 @@ export function createBgeSearchServer(): Server {
         name: 'search_bge',
         description: 'Search Swiss Federal Supreme Court (BGE) decisions by query, date range, chamber, and legal area. Uses entscheidsuche.ch API.',
         annotations: { readOnlyHint: true, destructiveHint: false },
+        _meta: uiMeta,
         inputSchema: {
           type: 'object',
           properties: {
@@ -75,6 +124,7 @@ export function createBgeSearchServer(): Server {
         name: 'get_bge_decision',
         description: 'Retrieve a specific BGE decision by citation. Uses entscheidsuche.ch API.',
         annotations: { readOnlyHint: true, destructiveHint: false },
+        _meta: uiMeta,
         inputSchema: {
           type: 'object',
           properties: {

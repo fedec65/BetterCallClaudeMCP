@@ -1,0 +1,16 @@
+{
+  "name": "@bettercallclaude/widgets-common",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Shared infrastructure for MCP Apps widgets — design system, i18n, helpers",
+  "scripts": {
+    "build": "WIDGET=jurisprudence-browser vite build && WIDGET=adversarial-dashboard vite build && node scripts/embed-html.mjs",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.2",
+    "vite": "^6.3.5",
+    "vite-plugin-singlefile": "^2.0.3"
+  }
+}

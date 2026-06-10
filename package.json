@@ -15,6 +15,7 @@
     "mcp-servers/integration-tests",
     "mcp-servers/legal-persona",
     "mcp-servers/tas-jurisprudence",
+    "packages/widgets-common",
     "mcp-servers-http"
   ],
   "scripts": {
