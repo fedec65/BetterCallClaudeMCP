@@ -4,15 +4,25 @@
  * Creates a Server instance with all entscheidsuche tool handlers.
  * Uses simplified EntscheidSucheClient (API-only, no database/cache).
  * Excludes get_related_decisions (requires database citation graph).
+ *
+ * MCP Apps: declares a jurisprudence-browser widget resource and adds
+ * _meta.ui to search tools. Backward compatible with text-only clients.
  */
 
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
+  ListResourcesRequestSchema,
+  ReadResourceRequestSchema,
+  ListResourceTemplatesRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 
 import { EntscheidSucheClient, type SearchFilters, type Decision } from '../lib/entscheidsuche-client.js';
+import { jurisprudenceBrowserHtml } from '../lib/embedded-widgets.js';
+
+const RESOURCE_MIME_TYPE = 'text/html;profile=mcp-app';
+const WIDGET_URI = 'ui://entscheidsuche/jurisprudence-browser';
 
 type Canton = 'ZH' | 'BE' | 'GE' | 'BS' | 'VD' | 'TI';
 
@@ -65,8 +75,8 @@ interface ProvisionInterpretationParams {
 
 export function createEntscheidsucheServer(): Server {
   const server = new Server(
-    { name: 'entscheidsuche', version: '2.0.0' },
-    { capabilities: { tools: {} } }
+    { name: 'entscheidsuche', version: '2.1.0' },
+    { capabilities: { tools: {}, resources: {} } }
   );
 
   const apiClient = new EntscheidSucheClient();
@@ -194,12 +204,50 @@ export function createEntscheidsucheServer(): Server {
     return { text: matches[0], context: ctx.length > 500 ? ctx.substring(0, 500) + '...' : ctx };
   }
 
-  // --- Tool definitions ---
+  // --- UI Resource handlers (MCP Apps) ---
+
+  server.setRequestHandler(ListResourcesRequestSchema, async () => ({
+    resources: [
+      {
+        uri: WIDGET_URI,
+        name: 'Jurisprudence Browser',
+        description: 'Interactive browser for Swiss court decision search results with filters, detail view, and analysis actions.',
+        mimeType: RESOURCE_MIME_TYPE,
+      },
+    ],
+  }));
+
+  server.setRequestHandler(ListResourceTemplatesRequestSchema, async () => ({
+    resourceTemplates: [],
+  }));
+
+  server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
+    if (request.params.uri === WIDGET_URI) {
+      return {
+        contents: [
+          {
+            uri: WIDGET_URI,
+            mimeType: RESOURCE_MIME_TYPE,
+            text: jurisprudenceBrowserHtml,
+          },
+        ],
+      };
+    }
+    throw new Error(`Unknown resource: ${request.params.uri}`);
+  });
+
+  // --- Tool definitions (with _meta.ui for MCP Apps) ---
+
+  const uiMeta = {
+    ui: { resourceUri: WIDGET_URI },
+    'ui/resourceUri': WIDGET_URI,
+  };
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
     tools: [
       {
         name: 'search_decisions',
+        _meta: uiMeta,
         description: 'Unified search across Swiss federal (Bundesgericht) and cantonal court decisions. Uses entscheidsuche.ch API. Supports multi-canton search.',
         annotations: { readOnlyHint: true, destructiveHint: false },
         inputSchema: {
@@ -221,6 +269,7 @@ export function createEntscheidsucheServer(): Server {
         name: 'search_canton',
         description: 'Search specific canton(s) with parallel aggregation. Optimized for cantonal-only searches.',
         annotations: { readOnlyHint: true, destructiveHint: false },
+        _meta: uiMeta,
         inputSchema: {
           type: 'object',
           properties: {
@@ -239,6 +288,7 @@ export function createEntscheidsucheServer(): Server {
         name: 'get_decision_details',
         description: 'Retrieve full details of a specific court decision by ID from entscheidsuche.ch.',
         annotations: { readOnlyHint: true, destructiveHint: false },
+        _meta: uiMeta,
         inputSchema: {
           type: 'object',
           properties: {
@@ -268,6 +318,7 @@ export function createEntscheidsucheServer(): Server {
         name: 'find_similar_cases',
         description: 'Find analogous court decisions based on a fact pattern or existing decision. Uses similarity scoring to identify relevant precedents.',
         annotations: { readOnlyHint: true, destructiveHint: false },
+        _meta: uiMeta,
         inputSchema: {
           type: 'object',
           properties: {
