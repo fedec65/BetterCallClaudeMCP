@@ -428,7 +428,7 @@ function computeDeadline(
 
 const baseTools: Tool[] = [
   {
-    name: 'legal-persona:legal_strategy',
+    name: 'legal_strategy',
     description: `Develops comprehensive legal strategy for Swiss law cases.
 
 Analyzes case facts and provides:
@@ -457,7 +457,7 @@ Supports federal and cantonal jurisdictions across all major Swiss legal areas.`
     },
   },
   {
-    name: 'legal-persona:legal_draft',
+    name: 'legal_draft',
     description: `Drafts Swiss legal documents with proper structure and terminology.
 
 Supports document types:
@@ -502,7 +502,7 @@ Output formats:
     },
   },
   {
-    name: 'legal-persona:legal_analyze',
+    name: 'legal_analyze',
     description: `Analyzes legal documents for issues, risks, and compliance.
 
 Analysis capabilities:
@@ -616,7 +616,7 @@ export function createLegalPersonaHttpServer(): Server {
     tools: [
       ...baseTools,
       {
-        name: 'legal-persona:present_adversarial_analysis',
+        name: 'present_adversarial_analysis',
         description: `Present an adversarial analysis as an interactive dashboard.
 
 Input: the synthesis produced by the adversarial-analysis skill (advocate/adversary perspectives + judicial synthesis with probability score).
@@ -628,7 +628,7 @@ The dashboard shows three columns (Advocate / Adversary / Judge) with expandable
         inputSchema: presentAdversarialAnalysisSchema,
       },
       {
-        name: 'legal-persona:present_intake_form',
+        name: 'present_intake_form',
         description: `Present a structured intake form for a legal briefing.
 
 Input: array of questions (from the legal-intake skill) with type, options, sections, and language.
@@ -687,7 +687,7 @@ The form renders questions grouped by section (context, parties, objective, cons
         },
       },
       {
-        name: 'legal-persona:compute_deadlines',
+        name: 'compute_deadlines',
         description: `Compute Swiss procedural deadlines (ZPO/BGG).
 
 Input: procedure type, notification date, canton, language.
@@ -733,25 +733,25 @@ Includes a mandatory disclaimer: this is an auxiliary tool, not legal advice.`,
 
     try {
       switch (name) {
-        case 'legal-persona:legal_strategy': {
+        case 'legal_strategy': {
           const input = LegalStrategyInputSchema.parse(args);
           const result = legalStrategy(input);
           return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
         }
 
-        case 'legal-persona:legal_draft': {
+        case 'legal_draft': {
           const input = LegalDraftInputSchema.parse(args);
           const result = legalDraft(input);
           return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
         }
 
-        case 'legal-persona:legal_analyze': {
+        case 'legal_analyze': {
           const input = LegalAnalyzeInputSchema.parse(args);
           const result = legalAnalyze(input);
           return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
         }
 
-        case 'legal-persona:present_adversarial_analysis': {
+        case 'present_adversarial_analysis': {
           const input = args as unknown as AdversarialInput;
           const textFallback = formatTextFallback(input);
           return {
@@ -759,7 +759,7 @@ Includes a mandatory disclaimer: this is an auxiliary tool, not legal advice.`,
           };
         }
 
-        case 'legal-persona:present_intake_form': {
+        case 'present_intake_form': {
           const { questions, language = 'de', caseTitle, isFollowUp = false } = args as {
             questions: Array<{ id: string; text: string; type: string; options?: string[]; required?: boolean; hint?: string; section?: string }>;
             language?: string;
@@ -817,7 +817,7 @@ Includes a mandatory disclaimer: this is an auxiliary tool, not legal advice.`,
           };
         }
 
-        case 'legal-persona:compute_deadlines': {
+        case 'compute_deadlines': {
           const { procedureType, notificationDate, canton, language = 'de' } = args as {
             procedureType: string;
             notificationDate: string;
