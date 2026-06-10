@@ -9,6 +9,9 @@ import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
+  ListResourcesRequestSchema,
+  ReadResourceRequestSchema,
+  ListResourceTemplatesRequestSchema,
   ErrorCode,
   McpError,
 } from '@modelcontextprotocol/sdk/types.js';
@@ -22,6 +25,12 @@ import type {
   CitationType,
   ParsedCitation,
 } from '@legal-citations/types.js';
+import { citationValidationHtml } from '../lib/embedded-widgets.js';
+
+const RESOURCE_MIME_TYPE = 'text/html;profile=mcp-app';
+const WIDGET_URI = 'ui://legal-citations/citation-validation';
+
+const TEXT_SIZE_LIMIT = 50_000; // chars — beyond this, process in chunks
 
 // --- Static data (copied from source, rarely changes) ---
 
@@ -113,13 +122,50 @@ function extractCitationsFromText(text: string, includeTypes: string[], parser: 
 
 export function createLegalCitationsServer(): Server {
   const server = new Server(
-    { name: 'legal-citations', version: '1.1.0' },
-    { capabilities: { tools: {} } }
+    { name: 'legal-citations', version: '1.2.0' },
+    { capabilities: { tools: {}, resources: {} } }
   );
 
   const validator = new CitationValidator();
   const formatter = new CitationFormatter();
   const parser = new CitationParser();
+
+  // --- UI Resource handlers (MCP Apps) ---
+
+  server.setRequestHandler(ListResourcesRequestSchema, async () => ({
+    resources: [
+      {
+        uri: WIDGET_URI,
+        name: 'Citation Validation Panel',
+        description: 'Interactive citation review panel with green/yellow/red classification, corrections, and batch actions.',
+        mimeType: RESOURCE_MIME_TYPE,
+      },
+    ],
+  }));
+
+  server.setRequestHandler(ListResourceTemplatesRequestSchema, async () => ({
+    resourceTemplates: [],
+  }));
+
+  server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
+    if (request.params.uri === WIDGET_URI) {
+      return {
+        contents: [
+          {
+            uri: WIDGET_URI,
+            mimeType: RESOURCE_MIME_TYPE,
+            text: citationValidationHtml,
+          },
+        ],
+      };
+    }
+    throw new Error(`Unknown resource: ${request.params.uri}`);
+  });
+
+  const uiMeta = {
+    ui: { resourceUri: WIDGET_URI },
+    'ui/resourceUri': WIDGET_URI,
+  };
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
     tools: [
@@ -170,6 +216,20 @@ export function createLegalCitationsServer(): Server {
         description: 'Compare different versions of a statutory provision over time.',
         annotations: { readOnlyHint: true, destructiveHint: false },
         inputSchema: { type: 'object', properties: { statute: { type: 'string' }, article: { type: 'number' }, paragraph: { type: 'number' }, dateFrom: { type: 'string' }, dateTo: { type: 'string' }, language: { type: 'string', enum: ['de', 'fr', 'it'] } }, required: ['statute', 'article'] },
+      },
+      {
+        name: 'review_citations',
+        description: 'Review all legal citations in a document: extract, validate, classify (green/yellow/red), and propose corrections. Composes extract_citations + validate_citation + format_citation. Returns an interactive citation validation panel for MCP Apps clients.',
+        annotations: { readOnlyHint: true, destructiveHint: false },
+        _meta: uiMeta,
+        inputSchema: {
+          type: 'object',
+          properties: {
+            text: { type: 'string', description: 'Document text to review for citations' },
+            language: { type: 'string', enum: ['de', 'fr', 'it', 'en'], description: 'Expected document language (for consistency checks)' },
+          },
+          required: ['text'],
+        },
       },
     ],
   }));
@@ -272,6 +332,115 @@ export function createLegalCitationsServer(): Server {
             { effectiveDate: from.toISOString().split('T')[0], text: `[Historical version SR ${sr} Art. ${article}]`, changeType: 'initial', changeDescription: 'Original enactment' },
             { effectiveDate: to.toISOString().split('T')[0], text: `[Current version SR ${sr} Art. ${article}]`, changeType: 'current', changeDescription: 'Current version in force' },
           ], totalVersions: 2, hasChanges: true }, null, 2) }] };
+        }
+
+        case 'review_citations': {
+          const { text, language: docLang } = args as { text: string; language?: string };
+          if (!text) throw new McpError(ErrorCode.InvalidParams, 'text required');
+
+          // Detect dominant language from citations
+          const extracted = extractCitationsFromText(text, ['all'], parser, true);
+          const langCounts: Record<string, number> = {};
+          for (const e of extracted) {
+            if (e.parsed?.language) langCounts[e.parsed.language] = (langCounts[e.parsed.language] || 0) + 1;
+          }
+          const dominantLanguage = docLang || Object.entries(langCounts).sort((a, b) => b[1] - a[1])[0]?.[0] || 'de';
+
+          // Classify each citation: green / yellow / red
+          const reviewed = extracted.map((e: any, idx: number) => {
+            const cit = e.citation as string;
+            const validated = validator.validate(cit);
+            const parsed = e.parsed;
+            let status: 'green' | 'yellow' | 'red' = 'green';
+            let correction: string | undefined;
+            let reason: string | undefined;
+
+            if (!validated.valid || e.valid === false) {
+              // Invalid citation
+              status = 'red';
+              reason = validated.errors?.join('; ') || 'Invalid citation';
+              // Attempt to produce a correction via formatter
+              if (parsed?.isValid && parsed?.components) {
+                try {
+                  const fmt = formatter.format(parsed.type, parsed.components, dominantLanguage as Language, { language: dominantLanguage as Language });
+                  if (fmt.citation && fmt.citation !== cit) correction = fmt.citation;
+                } catch { /* no correction available */ }
+              }
+            } else {
+              // Valid — check for warnings (yellow)
+              const hasWarnings = validated.warnings && validated.warnings.length > 0;
+              const langMismatch = parsed?.language && parsed.language !== dominantLanguage;
+              const isAbbreviated = parsed?.type === 'statute' && !cit.includes('Art.') && !cit.includes('art.');
+
+              if (hasWarnings || langMismatch || isAbbreviated) {
+                status = 'yellow';
+                const reasons: string[] = [];
+                if (hasWarnings) reasons.push(...(validated.warnings || []));
+                if (langMismatch) reasons.push(`Language mismatch: citation in ${parsed.language}, document in ${dominantLanguage}`);
+                if (isAbbreviated) reasons.push('Abbreviated form');
+                reason = reasons.join('; ');
+
+                // Suggest standardized form
+                if (parsed?.isValid && parsed?.components) {
+                  try {
+                    const fmt = formatter.format(parsed.type, parsed.components, dominantLanguage as Language, { language: dominantLanguage as Language });
+                    if (fmt.citation && fmt.citation !== cit) correction = fmt.citation;
+                  } catch { /* no correction */ }
+                }
+              }
+            }
+
+            // Extract surrounding context (±40 chars)
+            const ctxStart = Math.max(0, e.position.start - 40);
+            const ctxEnd = Math.min(text.length, e.position.end + 40);
+            const context = (ctxStart > 0 ? '…' : '') + text.slice(ctxStart, ctxEnd) + (ctxEnd < text.length ? '…' : '');
+
+            return {
+              id: idx,
+              original: cit,
+              context,
+              position: e.position,
+              status,
+              type: e.type || parsed?.type || 'unknown',
+              correction,
+              reason,
+            };
+          });
+
+          const green = reviewed.filter(r => r.status === 'green').length;
+          const yellow = reviewed.filter(r => r.status === 'yellow').length;
+          const red = reviewed.filter(r => r.status === 'red').length;
+
+          // Chunk info for large texts
+          const chunk = text.length > TEXT_SIZE_LIMIT
+            ? { current: 1, total: Math.ceil(text.length / TEXT_SIZE_LIMIT) }
+            : undefined;
+
+          const result = {
+            citations: reviewed,
+            dominantLanguage,
+            language: dominantLanguage,
+            textLength: text.length,
+            statistics: { total: reviewed.length, green, yellow, red },
+            _chunk: chunk,
+          };
+
+          // Text fallback for non-MCP-Apps clients
+          let fallback = `Citation Review Report\n`;
+          fallback += `======================\n\n`;
+          fallback += `Total citations: ${reviewed.length}\n`;
+          fallback += `Valid (green): ${green} | Warnings (yellow): ${yellow} | Invalid (red): ${red}\n`;
+          fallback += `Dominant language: ${dominantLanguage}\n\n`;
+
+          for (const r of reviewed) {
+            const icon = r.status === 'green' ? '[OK]' : r.status === 'yellow' ? '[WARN]' : '[ERR]';
+            fallback += `${icon} ${r.original}`;
+            if (r.reason) fallback += ` — ${r.reason}`;
+            if (r.correction) fallback += `\n     Correction: ${r.correction}`;
+            fallback += '\n';
+          }
+
+          return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
         }
 
         default:
