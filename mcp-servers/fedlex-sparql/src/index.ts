@@ -55,6 +55,7 @@ import {
 } from './queries/index.js';
 
 import { lookupSRByAbbreviation } from './abbreviation-map.js';
+import { fetchArticleText } from './html-fetcher.js';
 
 import type {
   Language,
@@ -170,12 +171,51 @@ async function lookupStatute(input: LookupStatuteInput): Promise<LookupStatuteRe
 }
 
 /**
- * Get a specific article within a legal act
+ * Get a specific article within a legal act.
+ *
+ * Primary strategy: fetch the consolidated HTML from the Fedlex
+ * filestore and extract article text via DOM id (works for ALL
+ * articles, not only modified ones).
+ * Fallback: SPARQL subdivision metadata (article URI, number).
  */
 async function getArticle(input: GetArticleInput): Promise<GetArticleResult> {
   const startTime = Date.now();
+  const language = input.language || 'de';
 
   try {
+    // --- Primary: HTML-based text retrieval ---
+    const htmlResult = await fetchArticleText(
+      sparqlClient,
+      input.srNumber,
+      input.articleNumber,
+      language,
+    );
+
+    if (htmlResult.found && htmlResult.article && htmlResult.consolidation) {
+      const article: Article = {
+        uri: `${htmlResult.consolidation.actUri}/art_${htmlResult.article.articleNumber}`,
+        number: htmlResult.article.articleNumber,
+        title: htmlResult.article.title
+          ? { [language]: htmlResult.article.title }
+          : {},
+        text: { [language]: htmlResult.article.textContent },
+      };
+
+      return {
+        found: true,
+        act: {
+          uri: htmlResult.consolidation.actUri,
+          srNumber: input.srNumber,
+          title: htmlResult.consolidation.actTitle
+            ? { [language]: htmlResult.consolidation.actTitle }
+            : {},
+        },
+        articles: [article],
+        searchTimeMs: Date.now() - startTime,
+      };
+    }
+
+    // --- Fallback: SPARQL-only (for edge cases) ---
     let query: string;
 
     if (input.paragraph) {
@@ -200,7 +240,9 @@ async function getArticle(input: GetArticleInput): Promise<GetArticleResult> {
       return {
         found: false,
         searchTimeMs: Date.now() - startTime,
-        note: "Fedlex only stores modified/amended articles. This article may exist in the original act but has never been modified. Use list_articles to see which articles are available for this SR number.",
+        note: htmlResult.fedlexUrl
+          ? `Article not found in the consolidated HTML. Try browsing: ${htmlResult.fedlexUrl}`
+          : "Article not found. The SR number may be incorrect or the article does not exist.",
       };
     }
 

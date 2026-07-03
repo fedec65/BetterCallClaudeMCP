@@ -22,9 +22,10 @@ import { CitationParser } from './parsers/citation-parser.js';
 import type { Language, FormatOptions, CitationComponents, CitationType, ParsedCitation } from './types.js';
 
 /**
- * Fedlex API configuration for provision text retrieval
+ * Fedlex endpoints
  */
-const FEDLEX_BASE_URL = 'https://www.fedlex.admin.ch/eli';
+const FEDLEX_SPARQL_ENDPOINT = 'https://fedlex.data.admin.ch/sparqlendpoint';
+const FEDLEX_WEB_BASE = 'https://www.fedlex.admin.ch';
 
 /**
  * Statute to SR number mapping for Fedlex API
@@ -713,9 +714,7 @@ class LegalCitationsMCPServer {
       );
     }
 
-    // Build Fedlex URL for API call
     const langCode = language === 'de' ? 'de' : language === 'fr' ? 'fr' : 'it';
-    const fedlexUrl = `${FEDLEX_BASE_URL}/cc/${srNumber}/${langCode}`;
 
     // Build the formatted citation reference
     const formattedCitation = this.buildProvisionReference(
@@ -726,8 +725,7 @@ class LegalCitationsMCPServer {
       language as Language
     );
 
-    // Simulate Fedlex API response (in production, this would be a real HTTP call)
-    // For now, return structured provision information
+    // Fetch real provision text from Fedlex HTML
     const provisionText = await this.fetchProvisionText(
       srNumber,
       article,
@@ -760,7 +758,7 @@ class LegalCitationsMCPServer {
               text: provisionText.text,
               effectiveDate: provisionText.effectiveDate,
               language,
-              fedlexUrl,
+              fedlexUrl: provisionText.fedlexUrl,
               metadata: {
                 lastModified: provisionText.lastModified,
                 version: provisionText.version
@@ -808,7 +806,11 @@ class LegalCitationsMCPServer {
   }
 
   /**
-   * Fetch provision text (simulated - in production would call Fedlex API)
+   * Fetch provision text from the Fedlex consolidated HTML.
+   *
+   * 1. SPARQL → resolve SR number to act URI, latest consolidation, HTML URL
+   * 2. HTTP GET → download consolidated HTML
+   * 3. Regex   → extract <article id="art_NNN"> and strip tags
    */
   private async fetchProvisionText(
     srNumber: string,
@@ -817,18 +819,158 @@ class LegalCitationsMCPServer {
     letter?: string,
     language: string = 'de',
     asOfDate?: string
-  ): Promise<{ text: string; effectiveDate: string; lastModified: string; version: string }> {
-    // In production, this would make an HTTP request to Fedlex API
-    // For now, return a placeholder indicating the provision location
+  ): Promise<{ text: string; effectiveDate: string; lastModified: string; version: string; fedlexUrl: string }> {
+    const langAuthority: Record<string, string> = {
+      de: 'DEU', fr: 'FRA', it: 'ITA',
+    };
+    const langUri = `http://publications.europa.eu/resource/authority/language/${langAuthority[language] || 'DEU'}`;
 
-    const effectiveDate = asOfDate || new Date().toISOString().split('T')[0];
+    // --- Step 1: SPARQL to get HTML URL and consolidation info ---
+    const sparqlQuery = [
+      'PREFIX jolux: <http://data.legilux.public.lu/resource/ontology/jolux#>',
+      'PREFIX skos: <http://www.w3.org/2004/02/skos/core#>',
+      '',
+      'SELECT ?act ?consolidation ?dateApplicability ?htmlUrl',
+      'WHERE {',
+      '  ?act a jolux:ConsolidationAbstract ;',
+      '       jolux:classifiedByTaxonomyEntry ?taxonomy .',
+      '  ?taxonomy skos:notation ?srNumber .',
+      `  FILTER(STR(?srNumber) = "${srNumber}")`,
+      '',
+      '  ?consolidation a jolux:Consolidation ;',
+      '                 jolux:isMemberOf ?act ;',
+      '                 jolux:dateApplicability ?dateApplicability .',
+      '  FILTER(?dateApplicability <= NOW())',
+      '',
+      '  ?consolidation jolux:isRealizedBy ?expr .',
+      `  ?expr jolux:language <${langUri}> .`,
+      '  ?expr jolux:isEmbodiedBy ?htmlManif .',
+      '  ?htmlManif jolux:userFormat <https://fedlex.data.admin.ch/vocabulary/user-format/html> ;',
+      '             jolux:isExemplifiedBy ?htmlUrl .',
+      '}',
+      'ORDER BY DESC(?dateApplicability)',
+      'LIMIT 1',
+    ].join('\n');
 
-    // Return structured response indicating this would need real API integration
+    const sparqlResponse = await fetch(FEDLEX_SPARQL_ENDPOINT, {
+      method: 'POST',
+      headers: {
+        'Accept': 'application/sparql-results+json',
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'User-Agent': 'BetterCallClaude/1.1.0 (Legal Citations)',
+      },
+      body: new URLSearchParams({ query: sparqlQuery }).toString(),
+    });
+
+    if (!sparqlResponse.ok) {
+      throw new McpError(
+        ErrorCode.InternalError,
+        `Fedlex SPARQL query failed: ${sparqlResponse.status}`,
+      );
+    }
+
+    const sparqlResult = await sparqlResponse.json() as {
+      results: { bindings: Array<Record<string, { value: string }>> };
+    };
+    const bindings = sparqlResult.results.bindings;
+
+    if (bindings.length === 0) {
+      throw new McpError(
+        ErrorCode.InternalError,
+        `No consolidated version found for SR ${srNumber}`,
+      );
+    }
+
+    const actUri = bindings[0].act.value;
+    const dateApplicability = bindings[0].dateApplicability.value;
+    const htmlUrl = bindings[0].htmlUrl.value;
+
+    // Build correct ELI-based Fedlex URL
+    const eliPath = actUri.replace('https://fedlex.data.admin.ch/', '');
+    const artAnchor = `art_${article}`;
+    const fedlexUrl = `${FEDLEX_WEB_BASE}/${eliPath}/${language}#${artAnchor}`;
+
+    // --- Step 2: Fetch the HTML ---
+    const htmlResponse = await fetch(htmlUrl, {
+      headers: {
+        'User-Agent': 'BetterCallClaude/1.1.0 (Legal Citations)',
+        Accept: 'text/html',
+      },
+    });
+
+    if (!htmlResponse.ok) {
+      throw new McpError(
+        ErrorCode.InternalError,
+        `Fedlex HTML fetch failed: ${htmlResponse.status}`,
+      );
+    }
+
+    const html = await htmlResponse.text();
+
+    // --- Step 3: Extract article text ---
+    const articleRegex = new RegExp(
+      `<article\\s+id="art_${article}"[^>]*>([\\s\\S]*?)</article>`,
+      'i',
+    );
+    const articleMatch = html.match(articleRegex);
+
+    if (!articleMatch) {
+      return {
+        text: `[Article ${article} not found in the consolidated HTML for SR ${srNumber}]`,
+        effectiveDate: dateApplicability,
+        lastModified: dateApplicability,
+        version: 'current',
+        fedlexUrl,
+      };
+    }
+
+    const articleHtml = articleMatch[1];
+
+    // Extract title from heading
+    let title = '';
+    const headingMatch = articleHtml.match(/<h6[^>]*>([\s\S]*?)<\/h6>/i);
+    if (headingMatch) {
+      const afterBold = headingMatch[1].replace(/[\s\S]*?<\/b>/i, '');
+      title = afterBold
+        .replace(/<sup[^>]*>[\s\S]*?<\/sup>/gi, '')
+        .replace(/<[^>]+>/g, '')
+        .trim();
+    }
+
+    // Extract content from collapseable div, stripping footnotes and HTML
+    const contentMatch = articleHtml.match(
+      /<div class="collapseable">([\s\S]*?)(?:<div class="footnotes">|<\/div>\s*$)/i,
+    );
+    let rawText = contentMatch ? contentMatch[1] : articleHtml;
+
+    // Strip HTML tags to plain text
+    let plainText = rawText
+      .replace(/<sup[^>]*>\s*(\d+)\s*<\/sup>/gi, '⁽$1⁾')
+      .replace(/&nbsp;/g, ' ')
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'")
+      .replace(/<div class="footnotes">[\s\S]*?<\/div>/gi, '')
+      .replace(/<br\s*\/?>/gi, '\n')
+      .replace(/<\/(p|div|dl|dt|dd|li|h[1-6])>/gi, '\n')
+      .replace(/<(p|div|dl|dt|dd|li|h[1-6])[^>]*>/gi, '')
+      .replace(/<[^>]+>/g, '')
+      .replace(/[ \t]+/g, ' ')
+      .replace(/\n\s*\n/g, '\n')
+      .trim();
+
+    if (title) {
+      plainText = `${title}\n${plainText}`;
+    }
+
     return {
-      text: `[Provision text would be fetched from Fedlex API: SR ${srNumber}, Art. ${article}${paragraph ? ` Abs. ${paragraph}` : ''}${letter ? ` lit. ${letter}` : ''}]`,
-      effectiveDate,
-      lastModified: new Date().toISOString(),
-      version: 'current'
+      text: plainText,
+      effectiveDate: dateApplicability,
+      lastModified: dateApplicability,
+      version: 'current',
+      fedlexUrl,
     };
   }
 
