@@ -688,9 +688,6 @@ export class EntscheidSucheClient extends BaseAPIClient {
     const spider = hierarchy[1] || this.extractSpiderFromId(hit._id);
     const canton = hierarchy[0] || '';
     const courtInfo = await this.labelService.get(spider) ?? COURT_MAP[spider];
-    // hierarchy[2] is the chamber node id (e.g. "CH_BGer_001") — resolve it
-    // to its localized label, never store the raw internal id as chamber
-    const chamberInfo = hierarchy[2] ? await this.labelService.get(hierarchy[2]) : undefined;
 
     // Determine language from attachment or default
     const language = (src.attachment?.language as 'de' | 'fr' | 'it') || 'de';
@@ -745,7 +742,10 @@ export class EntscheidSucheClient extends BaseAPIClient {
         ? (courtInfo.level === 'federal' ? 'federal' : 'cantonal')
         : (canton === 'CH' ? 'federal' : 'cantonal'),
       canton: courtInfo?.canton || (canton !== 'CH' ? canton : undefined),
-      chamber: chamberInfo?.name,
+      // chamber stays undefined: the chamber column is constrained to
+      // 'I'..'V' on Postgres; the raw hierarchy id (e.g. "CH_BGer_001")
+      // remains available in metadata.hierarchy
+      chamber: undefined,
       legalAreas: [],
       sourceUrl: String(sourceUrl),
       documentUrl,
