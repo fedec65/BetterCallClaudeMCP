@@ -303,3 +303,42 @@ export async function fetchArticleText(
     fedlexUrl,
   };
 }
+
+/**
+ * Extract a single paragraph (Absatz) from an article's plain text.
+ *
+ * Paragraphs are marked in the stripped text as ⁽N⁾ (from <sup>N</sup>).
+ * Returns the paragraph text without its marker, or null when the
+ * requested paragraph does not exist. Paragraph 1 is sometimes unmarked:
+ * if the first marker is ⁽2⁾, the text before it is paragraph 1.
+ */
+export function extractParagraphText(
+  textContent: string,
+  paragraph: string,
+): string | null {
+  const wanted = paragraph.replace(/[^\d]/g, '');
+  if (!wanted) return null;
+
+  const markers = [...textContent.matchAll(/⁽(\d+)⁾/g)];
+
+  if (markers.length === 0) {
+    // No markers at all: single-paragraph article.
+    return wanted === '1' ? textContent.trim() : null;
+  }
+
+  // Unmarked paragraph 1: text before the first marker (when it is ⁽2⁾).
+  if (wanted === '1' && markers[0][1] === '2' && markers[0].index! > 0) {
+    const lead = textContent.slice(0, markers[0].index).trim();
+    if (lead) return lead;
+  }
+
+  for (let i = 0; i < markers.length; i++) {
+    if (markers[i][1] === wanted) {
+      const start = markers[i].index! + markers[i][0].length;
+      const end = i + 1 < markers.length ? markers[i + 1].index! : textContent.length;
+      return textContent.slice(start, end).trim();
+    }
+  }
+
+  return null;
+}

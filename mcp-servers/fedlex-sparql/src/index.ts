@@ -55,7 +55,7 @@ import {
 } from './queries/index.js';
 
 import { lookupSRByAbbreviation } from './abbreviation-map.js';
-import { fetchArticleText } from './html-fetcher.js';
+import { fetchArticleText, extractParagraphText } from './html-fetcher.js';
 
 import type {
   Language,
@@ -198,13 +198,30 @@ async function getArticle(input: GetArticleInput): Promise<GetArticleResult> {
     );
 
     if (htmlResult.found && htmlResult.article && htmlResult.consolidation) {
+      let textContent = htmlResult.article.textContent;
+
+      // Honor the optional paragraph (Absatz) filter on the HTML path too
+      if (input.paragraph) {
+        const paragraphText = extractParagraphText(textContent, input.paragraph);
+        if (paragraphText === null) {
+          return {
+            found: false,
+            searchTimeMs: Date.now() - startTime,
+            note: htmlResult.fedlexUrl
+              ? `Paragraph ${input.paragraph} not found in article ${input.articleNumber}. Try browsing: ${htmlResult.fedlexUrl}`
+              : `Paragraph ${input.paragraph} not found in article ${input.articleNumber}.`,
+          };
+        }
+        textContent = paragraphText;
+      }
+
       const article: Article = {
         uri: `${htmlResult.consolidation.actUri}/art_${htmlResult.article.articleNumber}`,
         number: htmlResult.article.articleNumber,
         title: htmlResult.article.title
           ? { [language]: htmlResult.article.title }
           : {},
-        text: { [language]: htmlResult.article.textContent },
+        text: { [language]: textContent },
       };
 
       return {
