@@ -14,6 +14,18 @@
  * selectors are absent from the returned HTML, we transparently fall back
  * to Playwright. Set TAS_DISABLE_JINA=true to skip Jina entirely.
  * Optional env: JINA_API_KEY (raises Jina rate limits).
+ *
+ * Known trade-offs (deliberate):
+ * - Freshness: without an API key Jina only serves cached renders for
+ *   this site (an uncached render returns the empty SPA shell, which the
+ *   selector validation rejects). Cached copies can lag the live site;
+ *   TAS/CAS decisions are low-volatility data, and TAS_DISABLE_JINA=true
+ *   restores the render-it-yourself freshness guarantee.
+ * - Trust: the target URL (including search terms about public court
+ *   decisions) is sent to r.jina.ai, and the returned HTML is parsed as
+ *   page content. Parsing is read-only (cheerio — no script execution)
+ *   and only structured text fields are extracted. JINA_API_KEY is only
+ *   ever sent to r.jina.ai itself.
  */
 
 import * as cheerio from 'cheerio';
