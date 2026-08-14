@@ -175,7 +175,8 @@ class CourtLabelService {
         }
       }
     } catch {
-      // ignore — fallback map will be used
+      // Do not cache failures — allow a later attempt to reload the facet file
+      return map;
     }
     this.labels = map;
     return map;
@@ -680,6 +681,9 @@ export class EntscheidSucheClient extends BaseAPIClient {
     const spider = hierarchy[1] || this.extractSpiderFromId(hit._id);
     const canton = hierarchy[0] || '';
     const courtInfo = await this.labelService.get(spider) ?? COURT_MAP[spider];
+    // hierarchy[2] is the chamber node id (e.g. "CH_BGer_001") — resolve it
+    // to its localized label, never store the raw internal id as chamber
+    const chamberInfo = hierarchy[2] ? await this.labelService.get(hierarchy[2]) : undefined;
 
     // Determine language from attachment or default
     const language = (src.attachment?.language as 'de' | 'fr' | 'it') || 'de';
@@ -730,9 +734,11 @@ export class EntscheidSucheClient extends BaseAPIClient {
       decisionDate: src.date || '',
       language,
       court: courtInfo?.name || spider || 'Unknown',
-      courtLevel: courtInfo?.level === 'federal' ? 'federal' : 'cantonal',
+      courtLevel: courtInfo
+        ? (courtInfo.level === 'federal' ? 'federal' : 'cantonal')
+        : (canton === 'CH' ? 'federal' : 'cantonal'),
       canton: courtInfo?.canton || (canton !== 'CH' ? canton : undefined),
-      chamber: hierarchy[2],
+      chamber: chamberInfo?.name,
       legalAreas: [],
       sourceUrl: String(sourceUrl),
       documentUrl,
