@@ -375,8 +375,12 @@ export class EntscheidSucheClient {
 
     const size = filters.size || 10;
     if (decisions.length > 0 && decisions.length >= size) {
-      const last = decisions[decisions.length - 1];
-      result.nextCursor = [last.score, last.decisionId];
+      // search_after values must match the sort spec ([date, _score])
+      // positionally and type-wise — use the hit's own sort values
+      const lastHit = response.hits.hits[response.hits.hits.length - 1];
+      if (lastHit?.sort) {
+        result.nextCursor = lastHit.sort;
+      }
     }
 
     if (filters.includeAggregations && response.aggregations?.hierarchy) {

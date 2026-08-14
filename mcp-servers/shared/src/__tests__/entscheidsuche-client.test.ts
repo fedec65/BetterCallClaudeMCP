@@ -99,6 +99,7 @@ describe('EntscheidSucheClient', () => {
             {
               _id: 'CH_BGer_001_5A-123-2024_2024-06-15',
               _score: 1.0,
+              sort: [1718409600000, 1.0],
               _source: {
                 date: '2024-06-15',
                 hierarchy: ['CH', 'CH_BGer'],
@@ -116,7 +117,7 @@ describe('EntscheidSucheClient', () => {
 
       const result = await client.searchDecisions({ query: 'test', size: 1 });
 
-      expect(result.nextCursor).toEqual([1.0, 'CH_BGer_001_5A-123-2024_2024-06-15']);
+      expect(result.nextCursor).toEqual([1718409600000, 1.0]);
     });
 
     it('should include aggregations when requested', async () => {

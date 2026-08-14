@@ -256,6 +256,8 @@ export interface EntscheidSucheHit {
   _id: string;
   _index?: string;
   _score: number;
+  /** Per-hit sort values returned by Elasticsearch, positional to the query sort spec */
+  sort?: unknown[];
   highlight?: Record<string, string[]>;
   _source: {
     date?: string;
@@ -389,8 +391,9 @@ export class EntscheidSucheClient extends BaseAPIClient {
         ? response.hits.total
         : response.hits.total?.value || 0;
 
+      const hits = response.hits.hits || [];
       const decisions = await Promise.all(
-        (response.hits.hits || []).map(hit => this.normalizeHit(hit))
+        hits.map(hit => this.normalizeHit(hit))
       );
 
       const result: {
@@ -401,8 +404,12 @@ export class EntscheidSucheClient extends BaseAPIClient {
       } = { decisions, total };
 
       if (decisions.length > 0 && filters.size && decisions.length >= filters.size) {
-        const last = decisions[decisions.length - 1];
-        result.nextCursor = [last.score, last.decisionId];
+        // search_after values must match the sort spec ([date, _score])
+        // positionally and type-wise — use the hit's own sort values
+        const lastHit = hits[hits.length - 1];
+        if (lastHit?.sort) {
+          result.nextCursor = lastHit.sort;
+        }
       }
 
       if (filters.includeAggregations && response.aggregations?.hierarchy) {

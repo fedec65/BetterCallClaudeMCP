@@ -367,6 +367,7 @@ async function searchByCaseNumber(
       dateTo: filters?.dateTo,
       scrapeDateFrom: filters?.scrapeDateFrom,
       scrapeDateTo: filters?.scrapeDateTo,
+      cantons: filters?.cantons,
       size: filters?.limit || 20,
       from: filters?.from,
       searchAfter: filters?.searchAfter,
