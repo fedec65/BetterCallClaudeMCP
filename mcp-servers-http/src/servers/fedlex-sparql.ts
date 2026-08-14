@@ -109,6 +109,12 @@ export function createFedlexSparqlServer(): Server {
   }
 
   async function getArticle(input: GetArticleInput) {
+    if (!input.srNumber || !input.articleNumber) {
+      throw new Error(
+        "get_article requires 'srNumber' and 'articleNumber' (e.g. srNumber '220', articleNumber '41'). Resolve law abbreviations (OR, ZGB, ...) with lookup_statute first."
+      );
+    }
+
     const startTime = Date.now();
     const query = input.paragraph
       ? buildGetArticleParagraphQuery(input.srNumber, input.articleNumber, input.paragraph, input.language)
