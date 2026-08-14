@@ -9,7 +9,7 @@ import type { CasRecentOutput, CasRecentDecision } from '../types.js';
 import { generatePdfUrl, cleanText } from '../utils.js';
 import { recentCache } from '../infrastructure/cache.js';
 import { tasCasRateLimiter } from '../infrastructure/rate-limiter.js';
-import { withPage, navigateAndWaitWithBlazor } from './playwright-client.js';
+import { getRenderedHtml } from './jina-client.js';
 
 // Use search API with empty query - returns results sorted by date
 const SEARCH_BASE_URL = 'https://jurisprudence.tas-cas.org/search';
@@ -97,24 +97,21 @@ export async function getRecentDecisions(limit: number = 10): Promise<CasRecentO
   await tasCasRateLimiter.waitForSlot();
 
   try {
-    const result = await withPage(async (page) => {
-      const url = buildRecentSearchUrl(limit);
-
-      // Use Blazor-aware navigation (actually Angular, but same pattern)
-      const debugMode = process.env.DEBUG_SCRAPER === 'true';
-      await navigateAndWaitWithBlazor(page, url, {
-        waitForBlazor: false, // Angular, not Blazor
-        contentSelectors: [
-          'table tbody tr.line-wrapped',
-          'table tbody tr',
-          'tr.line-wrapped'
-        ],
-        timeout: 30000,
-        debug: debugMode
-      });
-
-      const html = await page.content();
-      const $ = cheerio.load(html);
+    const url = buildRecentSearchUrl(limit);
+    const debugMode = process.env.DEBUG_SCRAPER === 'true';
+    // Jina Reader renders the Angular page server-side; Playwright is the fallback
+    const html = await getRenderedHtml(url, {
+      waitForBlazor: false, // Angular, not Blazor
+      contentSelectors: [
+        'table tbody tr.line-wrapped',
+        'table tbody tr',
+        'tr.line-wrapped'
+      ],
+      timeout: 30000,
+      debug: debugMode
+    });
+    const $ = cheerio.load(html);
+    const result = (() => {
 
       const decisions: CasRecentDecision[] = [];
 
@@ -145,7 +142,7 @@ export async function getRecentDecisions(limit: number = 10): Promise<CasRecentO
         retrieved_at: new Date().toISOString(),
         source: url
       };
-    });
+    })();
 
     recentCache.set(cacheKey, result);
     return result;

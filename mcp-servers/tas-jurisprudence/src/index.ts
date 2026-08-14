@@ -3,6 +3,7 @@
  * Express server with Streamable HTTP transport for remote deployment
  */
 
+import { existsSync, readdirSync } from 'node:fs';
 import express, { type Request, type Response } from 'express';
 import { createMcpServer } from './server.js';
 
@@ -196,15 +197,14 @@ app.listen(PORT, () => {
   console.log(`Health check: http://localhost:${PORT}/health`);
 
   // Debug: Check Playwright browser availability at startup
-  const fs = require('fs');
   const expectedBrowserPath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH ||
     '/ms-playwright/chromium-1091/chrome-linux/chrome';
   console.log(`[Startup] Expected browser path: ${expectedBrowserPath}`);
-  console.log(`[Startup] Browser exists: ${fs.existsSync(expectedBrowserPath)}`);
+  console.log(`[Startup] Browser exists: ${existsSync(expectedBrowserPath)}`);
 
   // List available browsers in /ms-playwright if it exists
-  if (fs.existsSync('/ms-playwright')) {
-    const browsers = fs.readdirSync('/ms-playwright');
+  if (existsSync('/ms-playwright')) {
+    const browsers = readdirSync('/ms-playwright');
     console.log(`[Startup] Available browsers in /ms-playwright: ${browsers.join(', ')}`);
   }
 });
