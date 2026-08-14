@@ -5,6 +5,7 @@
  * Special handling for Blazor Server-Side Rendering with SignalR WebSockets
  */
 
+import { existsSync } from 'node:fs';
 import { chromium, type Browser, type Page, type BrowserContext } from 'playwright';
 import { DEFAULT_SCRAPER_CONFIG } from '../types.js';
 
@@ -126,14 +127,18 @@ export class PlaywrightClient {
    */
   async getBrowser(): Promise<Browser> {
     if (!this.browser || !this.browser.isConnected()) {
-      // Use Docker image's pre-installed chromium if available
-      const executablePath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH ||
-        '/ms-playwright/chromium-1091/chrome-linux/chrome';
+      // Resolve the chromium executable: explicit env override first, then
+      // the legacy standalone-image path, otherwise let Playwright use its
+      // own registry (PLAYWRIGHT_BROWSERS_PATH or the default cache dir) —
+      // required for the node:22-slim aggregator image, where the revision
+      // number in the hardcoded path may not match the installed one.
+      const envPath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH;
+      const legacyPath = '/ms-playwright/chromium-1091/chrome-linux/chrome';
+      const executablePath = envPath || (existsSync(legacyPath) ? legacyPath : undefined);
 
       // Debug logging for Railway deployment
-      console.log('[Playwright] Launching browser with executablePath:', executablePath);
-      console.log('[Playwright] env PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH:', process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH);
-      console.log('[Playwright] File exists at path:', require('fs').existsSync(executablePath));
+      console.log('[Playwright] Launching browser with executablePath:', executablePath ?? '(playwright registry)');
+      console.log('[Playwright] env PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH:', envPath);
 
       this.browser = await chromium.launch({
         headless: this.config.headless,
