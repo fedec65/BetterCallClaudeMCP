@@ -3,6 +3,7 @@
 > Model Context Protocol (MCP) servers for Swiss legal research.
 
 [![License: AGPL-3.0-or-later](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue.svg)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/fedec65/BetterCallClaudeMCP?sort=semver)](https://github.com/fedec65/BetterCallClaudeMCP/releases)
 [![MCP](https://img.shields.io/badge/MCP-Compatible-green.svg)](https://modelcontextprotocol.io)
 [![Node](https://img.shields.io/badge/node-%3E%3D20-blue.svg)](https://nodejs.org)
 
@@ -18,6 +19,8 @@ It contains:
 - A production deployment at
   **[`mcp.bettercallclaude.ch`](https://mcp.bettercallclaude.ch/health)**
   (Railway, auto-deployed from `main`).
+- Releases are tagged on `main` and published under
+  [GitHub Releases](https://github.com/fedec65/BetterCallClaudeMCP/releases).
 
 > This repo is **MCP-only**. Slash commands, skills, agents, hooks, the
 > `.mcp.json` config, and the Cowork plugin manifest live in
@@ -28,8 +31,8 @@ It contains:
 | Server | Tools | Purpose |
 |---|---|---|
 | [`bge-search`](mcp-servers/bge-search) | 3 | Swiss Federal Supreme Court (BGE/ATF/DTF) decision search |
-| [`entscheidsuche`](mcp-servers/entscheidsuche) | 6 | Federal + cantonal court decision search via [entscheidsuche.ch](https://entscheidsuche.ch) |
-| [`fedlex-sparql`](mcp-servers/fedlex-sparql) | 5 | Swiss federal legislation via the [Fedlex](https://fedlex.data.admin.ch) SPARQL endpoint |
+| [`entscheidsuche`](mcp-servers/entscheidsuche) | 9 (stdio) / 8 (HTTP) | Federal + cantonal court decision search via [entscheidsuche.ch](https://entscheidsuche.ch). Includes hierarchy/facet discovery, case-number lookup and pagination. |
+| [`fedlex-sparql`](mcp-servers/fedlex-sparql) | 5 | Swiss federal legislation via [Fedlex](https://fedlex.data.admin.ch). `get_article` returns the real article text (fetched from the consolidated HTML manifestation, with optional paragraph/Absatz filter) |
 | [`legal-citations`](mcp-servers/legal-citations) | 8 | Validate, parse, format, convert and extract Swiss legal citations |
 | [`onlinekommentar`](mcp-servers/onlinekommentar) | 4 | Scholarly commentaries from [onlinekommentar.ch](https://onlinekommentar.ch) |
 | [`legal-persona`](mcp-servers/legal-persona) | 3 | Case strategy, Swiss-legal document drafting (15 doc types), and document analysis |

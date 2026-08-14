@@ -18,10 +18,15 @@ export interface SearchFilters {
   courts?: string[];
   cantons?: string[];
   language?: 'de' | 'fr' | 'it';
+  languageFilter?: ('de' | 'fr' | 'it')[];
   dateFrom?: string;
   dateTo?: string;
+  scrapeDateFrom?: string;
+  scrapeDateTo?: string;
   size?: number;
   from?: number;
+  searchAfter?: unknown[];
+  includeAggregations?: boolean;
 }
 
 export interface Decision {
@@ -37,10 +42,15 @@ export interface Decision {
   chamber?: string;
   legalAreas: string[];
   sourceUrl: string;
+  documentUrl?: string;
+  originalUrl?: string;
   fullText?: string;
   score: number;
   bgeReference?: string;
   relatedDecisions?: string[];
+  isPdf?: boolean;
+  scrapeDate?: string;
+  highlights?: Record<string, string>;
   metadata?: {
     spider: string;
     hierarchy: string[];
@@ -51,27 +61,27 @@ export interface Decision {
 export interface SearchResult {
   decisions: Decision[];
   total: number;
+  nextCursor?: unknown[];
+  aggregations?: Record<string, number>;
 }
 
-// --- Court mapping ---
+export interface HierarchyEntry {
+  id: string;
+  count: number;
+}
 
-const COURT_MAP: Record<string, { name: string; canton?: string; level: 'federal' | 'cantonal' }> = {
-  'CH_BGer': { name: 'Bundesgericht', level: 'federal' },
-  'CH_BGE': { name: 'Bundesgericht (BGE)', level: 'federal' },
-  'CH_BVGer': { name: 'Bundesverwaltungsgericht', level: 'federal' },
-  'CH_BPatGer': { name: 'Bundespatentgericht', level: 'federal' },
-  'CH_BStGer': { name: 'Bundesstrafgericht', level: 'federal' },
-  'ZH_OG': { name: 'Obergericht Zürich', canton: 'ZH', level: 'cantonal' },
-  'ZH_VG': { name: 'Verwaltungsgericht Zürich', canton: 'ZH', level: 'cantonal' },
-  'BE_OG': { name: 'Obergericht Bern', canton: 'BE', level: 'cantonal' },
-  'BE_VG': { name: 'Verwaltungsgericht Bern', canton: 'BE', level: 'cantonal' },
-  'GE_CJ': { name: 'Cour de justice de Genève', canton: 'GE', level: 'cantonal' },
-  'GE_TA': { name: 'Tribunal administratif de Genève', canton: 'GE', level: 'cantonal' },
-  'BS_OG': { name: 'Appellationsgericht Basel-Stadt', canton: 'BS', level: 'cantonal' },
-  'BS_VG': { name: 'Verwaltungsgericht Basel-Stadt', canton: 'BS', level: 'cantonal' },
-  'VD_TC': { name: 'Tribunal cantonal Vaud', canton: 'VD', level: 'cantonal' },
-  'TI_CCA': { name: 'Tribunale cantonale Ticino', canton: 'TI', level: 'cantonal' },
-};
+export interface LocalizedLabels {
+  de?: string;
+  fr?: string;
+  it?: string;
+}
+
+export interface FacetNode extends LocalizedLabels {
+  id: string;
+  children?: FacetNode[];
+}
+
+import { COURT_MAP } from './entscheidsuche-courts.js';
 
 // --- Client ---
 
@@ -91,7 +101,22 @@ export class EntscheidSucheClient {
   async searchDecisions(filters: SearchFilters): Promise<SearchResult> {
     const esQuery = this.buildElasticsearchQuery(filters);
     const response = await this.post('/_search.php', esQuery);
-    return this.normalizeSearchResponse(response, filters.language);
+    return this.normalizeSearchResponse(response, filters);
+  }
+
+  /**
+   * Search decisions by case number / BGE citation.
+   * Wraps the value in quotes to force an exact phrase search.
+   */
+  async searchByCaseNumber(
+    caseNumber: string,
+    filters?: Omit<SearchFilters, 'query'>
+  ): Promise<SearchResult> {
+    return this.searchDecisions({
+      ...(filters || {}),
+      query: `"${caseNumber.replace(/"/g, '\\"')}"`,
+      size: filters?.size || 20,
+    } as SearchFilters);
   }
 
   /**
@@ -124,6 +149,69 @@ export class EntscheidSucheClient {
     } catch {
       return null;
     }
+  }
+
+  /**
+   * List available hierarchy IDs with hit counts.
+   */
+  async listHierarchy(query?: string, size: number = 1000): Promise<{
+    entries: HierarchyEntry[];
+    total: number;
+  }> {
+    const must: object[] = [];
+    if (query && query !== '*') {
+      must.push({
+        simple_query_string: {
+          query,
+          default_operator: 'and',
+        },
+      });
+    }
+
+    const body: Record<string, unknown> = {
+      size: 0,
+      aggs: {
+        hierarchy: {
+          terms: {
+            field: 'hierarchy',
+            size: Math.min(size, 10000),
+            order: { _count: 'desc' },
+          },
+        },
+      },
+    };
+
+    if (must.length === 1) {
+      body.query = must[0];
+    } else if (must.length > 1) {
+      body.query = { bool: { must } };
+    }
+
+    const response = await this.post('/_search.php', body);
+
+    const total = typeof response.hits.total === 'number'
+      ? response.hits.total
+      : response.hits.total?.value || 0;
+
+    const entries = (response.aggregations?.hierarchy?.buckets || []).map((bucket: any) => ({
+      id: bucket.key,
+      count: bucket.doc_count,
+    }));
+
+    return { entries, total };
+  }
+
+  /**
+   * Return the localized facet tree (canton → court → chamber).
+   */
+  async listFacets(): Promise<FacetNode[]> {
+    const data = await this.get('/docs/Facetten_alle.json');
+    if (!data) {
+      throw new Error('Failed to load facet tree');
+    }
+    return Object.entries(data as Record<string, unknown>).map(([id, node]) =>
+      this.buildFacetNode(id, node as FacetFileNode)
+    );
   }
 
   // --- Private: HTTP ---
@@ -206,7 +294,9 @@ export class EntscheidSucheClient {
       must.push({ terms: { hierarchy: filters.cantons } });
     }
 
-    if (filters.language) {
+    if (filters.languageFilter && filters.languageFilter.length > 0) {
+      must.push({ terms: { 'attachment.language': filters.languageFilter } });
+    } else if (filters.language) {
       must.push({ term: { 'attachment.language': filters.language } });
     }
 
@@ -217,21 +307,58 @@ export class EntscheidSucheClient {
       must.push({ range: { date: range } });
     }
 
+    if (filters.scrapeDateFrom || filters.scrapeDateTo) {
+      const range: Record<string, string> = {};
+      if (filters.scrapeDateFrom) range.gte = filters.scrapeDateFrom;
+      if (filters.scrapeDateTo) range.lte = filters.scrapeDateTo;
+      must.push({ range: { scrape_date: range } });
+    }
+
+    const body: Record<string, unknown> = {
+      size: filters.size || 10,
+      from: filters.from ?? 0,
+      sort: [{ date: 'desc' }, '_score'],
+      highlight: {
+        fields: {
+          'attachment.content': {},
+          title: {},
+          abstract: {},
+        },
+        number_of_fragments: 3,
+        fragment_size: 300,
+      },
+    };
+
+    if (filters.searchAfter && filters.searchAfter.length > 0) {
+      body.search_after = filters.searchAfter;
+      delete body.from;
+    }
+
+    if (filters.includeAggregations) {
+      body.aggs = {
+        hierarchy: {
+          terms: {
+            field: 'hierarchy',
+            size: 100,
+            order: { _count: 'desc' },
+          },
+        },
+      };
+    }
+
     const query = must.length === 1
       ? must[0]
       : { bool: { must } };
 
     return {
-      size: filters.size || 10,
-      from: filters.from || 0,
-      sort: [{ date: 'desc' }],
+      ...body,
       query,
     };
   }
 
   // --- Private: Response normalization ---
 
-  private normalizeSearchResponse(response: any, preferredLang?: string): SearchResult {
+  private normalizeSearchResponse(response: any, filters: SearchFilters): SearchResult {
     if (!response?.hits?.hits) {
       return { decisions: [], total: 0 };
     }
@@ -241,10 +368,28 @@ export class EntscheidSucheClient {
       : response.hits.total?.value || 0;
 
     const decisions = response.hits.hits.map((hit: any) =>
-      this.normalizeHit(hit, preferredLang)
+      this.normalizeHit(hit, filters.language)
     );
 
-    return { decisions, total };
+    const result: SearchResult = { decisions, total };
+
+    const size = filters.size || 10;
+    if (decisions.length > 0 && decisions.length >= size) {
+      const last = decisions[decisions.length - 1];
+      result.nextCursor = [last.score, last.decisionId];
+    }
+
+    if (filters.includeAggregations && response.aggregations?.hierarchy) {
+      result.aggregations = response.aggregations.hierarchy.buckets.reduce(
+        (acc: Record<string, number>, bucket: any) => {
+          acc[bucket.key] = bucket.doc_count;
+          return acc;
+        },
+        {}
+      );
+    }
+
+    return result;
   }
 
   private normalizeHit(hit: any, preferredLang?: string): Decision {
@@ -259,6 +404,15 @@ export class EntscheidSucheClient {
 
     const summary = this.extractLocalizedText(source.abstract, lang) || '';
 
+    const highlights: Record<string, string> = {};
+    if (hit.highlight) {
+      for (const [field, fragments] of Object.entries(hit.highlight)) {
+        if (Array.isArray(fragments) && fragments.length > 0) {
+          highlights[field] = fragments.join(' … ');
+        }
+      }
+    }
+
     return {
       decisionId: hit._id,
       signature: hit._id,
@@ -271,10 +425,17 @@ export class EntscheidSucheClient {
       canton: courtInfo?.canton,
       legalAreas: [],
       sourceUrl: source.attachment?.content_url || `${this.baseUrl}/docs/${spider}/${hit._id}`,
+      documentUrl: spider && hit._id
+        ? `${this.baseUrl}/docs/${spider}/${hit._id}.html`
+        : undefined,
+      originalUrl: source.original_url,
       fullText: source.attachment?.content,
       score: hit._score || 0,
       bgeReference: this.extractBGEReference(title, hit._id),
       relatedDecisions: [],
+      isPdf: source.is_pdf,
+      scrapeDate: source.scrape_date,
+      highlights,
       metadata: {
         spider,
         hierarchy: source.hierarchy || [],
@@ -299,4 +460,52 @@ export class EntscheidSucheClient {
     const match = combined.match(/(\d{2,3})\s+(I{1,3}|IV|V)\s+(\d+)/);
     return match ? `BGE ${match[1]} ${match[2]} ${match[3]}` : undefined;
   }
+
+  // --- Private: Facet tree builder ---
+
+  private buildFacetNode(id: string, node: FacetFileNode): FacetNode {
+    const children: FacetNode[] = [];
+    for (const [courtId, court] of Object.entries(node.gerichte || {})) {
+      children.push(this.buildCourtNode(courtId, court as FacetCourtNode));
+    }
+    return {
+      id,
+      de: node.de,
+      fr: node.fr,
+      it: node.it,
+      children: children.length > 0 ? children : undefined,
+    };
+  }
+
+  private buildCourtNode(id: string, node: FacetCourtNode): FacetNode {
+    const children: FacetNode[] = [];
+    for (const [chamberId, chamber] of Object.entries(node.kammern || {})) {
+      const ch = chamber as FacetChamberNode;
+      children.push({
+        id: chamberId,
+        de: ch.de,
+        fr: ch.fr,
+        it: ch.it,
+      });
+    }
+    return {
+      id,
+      de: node.de,
+      fr: node.fr,
+      it: node.it,
+      children: children.length > 0 ? children : undefined,
+    };
+  }
+}
+
+interface FacetFileNode extends LocalizedLabels {
+  gerichte?: Record<string, FacetCourtNode>;
+}
+
+interface FacetCourtNode extends LocalizedLabels {
+  kammern?: Record<string, FacetChamberNode>;
+}
+
+interface FacetChamberNode extends LocalizedLabels {
+  spider?: string;
 }
