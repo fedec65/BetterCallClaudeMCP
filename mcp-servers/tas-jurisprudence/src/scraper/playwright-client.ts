@@ -5,6 +5,7 @@
  * Special handling for Blazor Server-Side Rendering with SignalR WebSockets
  */
 
+import { existsSync } from 'node:fs';
 import { chromium, type Browser, type Page, type BrowserContext } from 'playwright';
 import { DEFAULT_SCRAPER_CONFIG } from '../types.js';
 
@@ -133,7 +134,7 @@ export class PlaywrightClient {
       // Debug logging for Railway deployment
       console.log('[Playwright] Launching browser with executablePath:', executablePath);
       console.log('[Playwright] env PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH:', process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH);
-      console.log('[Playwright] File exists at path:', require('fs').existsSync(executablePath));
+      console.log('[Playwright] File exists at path:', existsSync(executablePath));
 
       this.browser = await chromium.launch({
         headless: this.config.headless,
