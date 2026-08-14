@@ -32,6 +32,7 @@ import {
   LEGAL_DOMAINS,
 } from '@fedlex-sparql/queries/index.js';
 import { lookupSRByAbbreviation } from '@fedlex-sparql/abbreviation-map.js';
+import { fetchArticleText } from '@fedlex-sparql/html-fetcher.js';
 
 import type {
   Language,
@@ -116,6 +117,43 @@ export function createFedlexSparqlServer(): Server {
     }
 
     const startTime = Date.now();
+    const language = input.language || 'de';
+
+    // --- Primary: HTML-based text retrieval ---
+    // The SPARQL endpoint only stores structural metadata; the actual
+    // article text lives in the consolidated HTML manifestation.
+    const htmlResult = await fetchArticleText(
+      sparqlClient,
+      input.srNumber,
+      input.articleNumber,
+      language,
+    );
+
+    if (htmlResult.found && htmlResult.article && htmlResult.consolidation) {
+      const article: Article = {
+        uri: `${htmlResult.consolidation.actUri}/art_${htmlResult.article.articleNumber}`,
+        number: htmlResult.article.articleNumber,
+        title: htmlResult.article.title
+          ? { [language]: htmlResult.article.title }
+          : {},
+        text: { [language]: htmlResult.article.textContent },
+      };
+
+      return {
+        found: true,
+        act: {
+          uri: htmlResult.consolidation.actUri,
+          srNumber: input.srNumber,
+          title: htmlResult.consolidation.actTitle
+            ? { [language]: htmlResult.consolidation.actTitle }
+            : {},
+        },
+        articles: [article],
+        searchTimeMs: Date.now() - startTime,
+      };
+    }
+
+    // --- Fallback: SPARQL-only (for edge cases) ---
     const query = input.paragraph
       ? buildGetArticleParagraphQuery(input.srNumber, input.articleNumber, input.paragraph, input.language)
       : buildGetArticleQuery(input.srNumber, input.articleNumber, input.language);
@@ -124,7 +162,13 @@ export function createFedlexSparqlServer(): Server {
     const bindings = result.results.bindings;
 
     if (bindings.length === 0) {
-      return { found: false, searchTimeMs: Date.now() - startTime };
+      return {
+        found: false,
+        searchTimeMs: Date.now() - startTime,
+        note: htmlResult.fedlexUrl
+          ? `Article not found in the consolidated HTML. Try browsing: ${htmlResult.fedlexUrl}`
+          : 'Article not found. The SR number may be incorrect or the article does not exist.',
+      };
     }
 
     const firstBinding = bindings[0];
