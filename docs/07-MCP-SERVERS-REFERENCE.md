@@ -14,14 +14,22 @@ Swiss Federal Supreme Court (Bundesgericht) decision search.
 | `bge-search:search` | Search BGE/ATF/DTF decisions with optional filters (volume, section, year range, legal domain, language). |
 | `bge-search:get_bge` | Retrieve a specific BGE decision by citation (e.g. `BGE 147 IV 73`). |
 
-## 2. `entscheidsuche` (stdio)
+## 2. `entscheidsuche` (stdio + HTTP)
 
 Swiss federal + cantonal court decision search via entscheidsuche.ch.
 
 | Tool | Description |
 |---|---|
-| `entscheidsuche:search` | Full-text search across federal and cantonal court decisions with court/date/canton/language filters. |
-| `entscheidsuche:get_document` | Fetch the full text of a decision by its entscheidsuche document ID. |
+| `search_decisions` | Full-text search across federal and cantonal court decisions. Supports Lucene syntax (phrases, booleans, wildcards), all 26 cantons, hierarchy filters, pagination, and aggregations. |
+| `search_canton` | Search specific canton(s) with per-canton aggregation. |
+| `search_by_case_number` | Look up a decision by case number, docket number or BGE citation (e.g. `BGE 142 III 1`). |
+| `get_decision_details` | Fetch the full text of a decision by its entscheidsuche document ID. |
+| `list_hierarchy` | Discover available court/chamber hierarchy IDs with hit counts. |
+| `list_facets` | Browse the hierarchical facet tree (canton → court → chamber) with localized labels. |
+| `analyze_precedent_success_rate` | Analyze historical success rates for a claim type in a legal area. |
+| `find_similar_cases` | Find analogous decisions based on a fact pattern or existing decision. |
+| `get_legal_provision_interpretation` | Retrieve BGE interpretations of a statutory provision. |
+| `get_related_decisions` | Find related decisions via citation graph (stdio only; requires database). |
 
 ## 3. `legal-citations` (stdio)
 

@@ -36,32 +36,45 @@ import {
   EntscheidSucheClient,
   DecisionRepository,
   CacheRepository,
-  type Canton,
   type EntscheidSucheDecision,
   type EntscheidSucheSearchFilters,
+  type HierarchyEntry,
+  type FacetNode,
 } from "@bettercallclaude/shared";
 
 // Unified search parameters interface (MCP tool input)
 interface SearchParams {
   query: string;
   courtLevel?: "federal" | "cantonal" | "all";
-  cantons?: Canton[];
+  cantons?: string[];
   language?: string;
+  languageFilter?: string[];
   dateFrom?: string;
   dateTo?: string;
+  scrapeDateFrom?: string;
+  scrapeDateTo?: string;
   legalAreas?: string[];
   limit?: number;
+  from?: number;
+  searchAfter?: unknown[];
+  includeAggregations?: boolean;
 }
 
 // Canton-specific search parameters
 interface CantonSearchParams {
   query: string;
-  cantons: Canton[];
+  cantons: string[];
   language?: string;
+  languageFilter?: string[];
   dateFrom?: string;
   dateTo?: string;
+  scrapeDateFrom?: string;
+  scrapeDateTo?: string;
   legalAreas?: string[];
   limit?: number;
+  from?: number;
+  searchAfter?: unknown[];
+  includeAggregations?: boolean;
 }
 
 /**
@@ -86,10 +99,12 @@ async function searchDecisions(params: SearchParams): Promise<{
   totalResults: number;
   searchTimeMs: number;
   fromCache: boolean;
+  nextCursor?: unknown[];
   facets: {
     byCourtLevel: Record<string, number>;
     byCanton: Record<string, number>;
   };
+  aggregations?: Record<string, number>;
 }> {
   if (!configReady) {
     throw new Error("Server running in degraded mode: configuration/API clients not initialized. Database or network initialization failed at startup.");
@@ -120,7 +135,7 @@ async function searchDecisions(params: SearchParams): Promise<{
     // Map court level to spider names for filtering
     let courts: string[] | undefined;
     if (params.courtLevel === "federal") {
-      courts = ['CH_BGer', 'CH_BGE', 'CH_BVGer', 'CH_BPatGer', 'CH_BStGer'];
+      courts = ['CH_BGer', 'CH_BGE', 'CH_BGB', 'CH_BVGE', 'CH_PATG', 'CH_BSTG'];
     }
     // Canton filter handled by EntscheidSucheClient via cantons param
 
@@ -130,9 +145,15 @@ async function searchDecisions(params: SearchParams): Promise<{
       courts: courts,
       cantons: params.cantons,
       language: params.language as 'de' | 'fr' | 'it' | undefined,
+      languageFilter: params.languageFilter as ('de' | 'fr' | 'it')[] | undefined,
       dateFrom: params.dateFrom,
       dateTo: params.dateTo,
+      scrapeDateFrom: params.scrapeDateFrom,
+      scrapeDateTo: params.scrapeDateTo,
       size: params.limit || 10,
+      from: params.from,
+      searchAfter: params.searchAfter,
+      includeAggregations: params.includeAggregations,
     };
 
     const apiResult = await entscheidSucheClient.searchDecisions(filters);
@@ -185,7 +206,9 @@ async function searchDecisions(params: SearchParams): Promise<{
     const result = {
       decisions: allDecisions,
       totalResults: apiResult.total,
+      nextCursor: apiResult.nextCursor,
       facets,
+      aggregations: apiResult.aggregations,
     };
     if (databaseReady) {
       await cacheRepo.set(cacheKey, JSON.stringify(result), 3600);
@@ -210,7 +233,9 @@ async function searchCanton(params: CantonSearchParams): Promise<{
   totalResults: number;
   searchTimeMs: number;
   fromCache: boolean;
+  nextCursor?: unknown[];
   byCanton: Record<string, number>;
+  aggregations?: Record<string, number>;
 }> {
   if (!configReady) {
     throw new Error("Server running in degraded mode: configuration/API clients not initialized.");
@@ -243,9 +268,15 @@ async function searchCanton(params: CantonSearchParams): Promise<{
       query: params.query,
       cantons: params.cantons,
       language: params.language as 'de' | 'fr' | 'it' | undefined,
+      languageFilter: params.languageFilter as ('de' | 'fr' | 'it')[] | undefined,
       dateFrom: params.dateFrom,
       dateTo: params.dateTo,
+      scrapeDateFrom: params.scrapeDateFrom,
+      scrapeDateTo: params.scrapeDateTo,
       size: params.limit || 10,
+      from: params.from,
+      searchAfter: params.searchAfter,
+      includeAggregations: params.includeAggregations,
     };
 
     const apiResult = await entscheidSucheClient.searchDecisions(filters);
@@ -290,7 +321,9 @@ async function searchCanton(params: CantonSearchParams): Promise<{
     const result = {
       decisions,
       totalResults: apiResult.total,
+      nextCursor: apiResult.nextCursor,
       byCanton,
+      aggregations: apiResult.aggregations,
     };
     if (databaseReady) {
       await cacheRepo.set(cacheKey, JSON.stringify(result), 3600);
@@ -303,6 +336,90 @@ async function searchCanton(params: CantonSearchParams): Promise<{
     };
   } catch (error) {
     logger.error("Canton search failed", error as Error, { params });
+    throw error;
+  }
+}
+
+/**
+ * Search decisions by case number / BGE citation.
+ */
+async function searchByCaseNumber(
+  caseNumber: string,
+  filters?: Omit<SearchParams, 'query'>
+): Promise<{
+  decisions: EntscheidSucheDecision[];
+  totalResults: number;
+  searchTimeMs: number;
+  fromCache: boolean;
+  nextCursor?: unknown[];
+}> {
+  if (!configReady) {
+    throw new Error("Server running in degraded mode: configuration/API clients not initialized.");
+  }
+
+  const startTime = Date.now();
+
+  try {
+    const result = await entscheidSucheClient.searchByCaseNumber(caseNumber, {
+      language: filters?.language as 'de' | 'fr' | 'it' | undefined,
+      languageFilter: filters?.languageFilter as ('de' | 'fr' | 'it')[] | undefined,
+      dateFrom: filters?.dateFrom,
+      dateTo: filters?.dateTo,
+      scrapeDateFrom: filters?.scrapeDateFrom,
+      scrapeDateTo: filters?.scrapeDateTo,
+      cantons: filters?.cantons,
+      size: filters?.limit || 20,
+      from: filters?.from,
+      searchAfter: filters?.searchAfter,
+    });
+
+    return {
+      decisions: result.decisions,
+      totalResults: result.total,
+      searchTimeMs: Date.now() - startTime,
+      fromCache: false,
+      nextCursor: result.nextCursor,
+    };
+  } catch (error) {
+    logger.error("Search by case number failed", error as Error, { caseNumber });
+    throw error;
+  }
+}
+
+/**
+ * List available court/chamber hierarchy IDs with hit counts.
+ */
+async function listHierarchy(query?: string, size?: number): Promise<{
+  entries: HierarchyEntry[];
+  total: number;
+}> {
+  if (!configReady) {
+    throw new Error("Server running in degraded mode: configuration/API clients not initialized.");
+  }
+
+  try {
+    return await entscheidSucheClient.listHierarchy(query, size);
+  } catch (error) {
+    logger.error("List hierarchy failed", error as Error, { query, size });
+    throw error;
+  }
+}
+
+/**
+ * List localized court/chamber facet tree.
+ */
+async function listFacets(): Promise<{
+  facets: FacetNode[];
+}> {
+  if (!configReady) {
+    throw new Error("Server running in degraded mode: configuration/API clients not initialized.");
+  }
+
+  try {
+    const facets = await entscheidSucheClient.listFacets();
+    return { facets };
+  } catch (error) {
+    logger.error("List facets failed", error as Error, {});
     throw error;
   }
 }
@@ -472,7 +589,7 @@ interface PrecedentAnalysisParams {
   legalArea: string;
   claimType: string;
   courtLevel?: "federal" | "cantonal" | "all";
-  cantons?: Canton[];
+  cantons?: string[];
   dateFrom?: string;
   dateTo?: string;
 }
@@ -1085,7 +1202,7 @@ async function main() {
         {
           name: "search_decisions",
           description:
-            "Unified search across Swiss federal (Bundesgericht) and cantonal court decisions. Uses real APIs with database caching. Supports multi-canton parallel search.",
+            "Unified search across Swiss federal (Bundesgericht) and cantonal court decisions via entscheidsuche.ch. Supports Lucene query syntax (phrases in quotes, AND/OR/NOT, wildcards), pagination, hierarchy filters and aggregations.",
           annotations: {
             readOnlyHint: true,
             destructiveHint: false,
@@ -1096,7 +1213,7 @@ async function main() {
               query: {
                 type: "string",
                 description:
-                  "Search query for court decisions (searches title, summary, full text)",
+                  "Search query for court decisions (searches title, summary, full text). Use \"BGE 142 III 1\" for exact phrases, AND/OR/NOT for boolean, * and ? for wildcards.",
               },
               courtLevel: {
                 type: "string",
@@ -1105,27 +1222,39 @@ async function main() {
               },
               cantons: {
                 type: "array",
-                items: {
-                  type: "string",
-                  enum: ["ZH", "BE", "GE", "BS", "VD", "TI"],
-                },
+                items: { type: "string" },
                 description:
-                  "Filter by specific cantons (ZH=Zürich, BE=Bern, GE=Geneva, BS=Basel, VD=Vaud, TI=Ticino)",
+                  "Filter by canton codes (e.g. ZH, BE) or hierarchy IDs from list_hierarchy. Accepts all 26 cantons.",
               },
               language: {
                 type: "string",
                 enum: ["de", "fr", "it"],
-                description: "Language filter (de=German, fr=French, it=Italian)",
+                description: "Preferred display language (de=German, fr=French, it=Italian). For filtering use languageFilter.",
+              },
+              languageFilter: {
+                type: "array",
+                items: { type: "string", enum: ["de", "fr", "it"] },
+                description: "Filter by document language(s)",
               },
               dateFrom: {
                 type: "string",
                 format: "date",
-                description: "Start date filter (ISO 8601 format: YYYY-MM-DD)",
+                description: "Start decision date filter (ISO 8601 format: YYYY-MM-DD)",
               },
               dateTo: {
                 type: "string",
                 format: "date",
-                description: "End date filter (ISO 8601 format: YYYY-MM-DD)",
+                description: "End decision date filter (ISO 8601 format: YYYY-MM-DD)",
+              },
+              scrapeDateFrom: {
+                type: "string",
+                format: "date",
+                description: "Start scrape date filter (ISO 8601 format: YYYY-MM-DD)",
+              },
+              scrapeDateTo: {
+                type: "string",
+                format: "date",
+                description: "End scrape date filter (ISO 8601 format: YYYY-MM-DD)",
               },
               legalAreas: {
                 type: "array",
@@ -1138,7 +1267,21 @@ async function main() {
                 minimum: 1,
                 maximum: 100,
                 default: 10,
-                description: "Maximum number of results to return",
+                description: "Maximum number of results to return (1-100)",
+              },
+              from: {
+                type: "number",
+                minimum: 0,
+                description: "Offset for pagination (use searchAfter for deep pagination)",
+              },
+              searchAfter: {
+                type: "array",
+                description: "Cursor from previous response's nextCursor for deep pagination",
+              },
+              includeAggregations: {
+                type: "boolean",
+                default: false,
+                description: "Include hierarchy aggregations (counts per court/chamber)",
               },
             },
             required: ["query"],
@@ -1147,7 +1290,7 @@ async function main() {
         {
           name: "search_canton",
           description:
-            "Search specific canton(s) with parallel aggregation. Optimized for cantonal-only searches across multiple cantons.",
+            "Search specific canton(s) with parallel aggregation. Optimized for cantonal-only searches across multiple cantons. Accepts all 26 Swiss cantons.",
           annotations: {
             readOnlyHint: true,
             destructiveHint: false,
@@ -1161,26 +1304,38 @@ async function main() {
               },
               cantons: {
                 type: "array",
-                items: {
-                  type: "string",
-                  enum: ["ZH", "BE", "GE", "BS", "VD", "TI"],
-                },
-                description: "Cantons to search (required)",
+                items: { type: "string" },
+                description: "Cantons to search (required). All 26 canton codes accepted.",
               },
               language: {
                 type: "string",
                 enum: ["de", "fr", "it"],
-                description: "Language filter",
+                description: "Preferred display language",
+              },
+              languageFilter: {
+                type: "array",
+                items: { type: "string", enum: ["de", "fr", "it"] },
+                description: "Filter by document language(s)",
               },
               dateFrom: {
                 type: "string",
                 format: "date",
-                description: "Start date filter (ISO 8601 format: YYYY-MM-DD)",
+                description: "Start decision date filter (ISO 8601 format: YYYY-MM-DD)",
               },
               dateTo: {
                 type: "string",
                 format: "date",
-                description: "End date filter (ISO 8601 format: YYYY-MM-DD)",
+                description: "End decision date filter (ISO 8601 format: YYYY-MM-DD)",
+              },
+              scrapeDateFrom: {
+                type: "string",
+                format: "date",
+                description: "Start scrape date filter (ISO 8601 format: YYYY-MM-DD)",
+              },
+              scrapeDateTo: {
+                type: "string",
+                format: "date",
+                description: "End scrape date filter (ISO 8601 format: YYYY-MM-DD)",
               },
               legalAreas: {
                 type: "array",
@@ -1194,8 +1349,131 @@ async function main() {
                 default: 10,
                 description: "Maximum number of results per canton",
               },
+              from: {
+                type: "number",
+                minimum: 0,
+                description: "Offset for pagination",
+              },
+              searchAfter: {
+                type: "array",
+                description: "Cursor from previous response's nextCursor",
+              },
+              includeAggregations: {
+                type: "boolean",
+                default: false,
+                description: "Include hierarchy aggregations",
+              },
             },
             required: ["query", "cantons"],
+          },
+        },
+        {
+          name: "search_by_case_number",
+          description:
+            "Search for a Swiss court decision by case number, docket number or BGE citation (e.g. \"BGE 142 III 1\" or \"5A_396/2015\"). Wraps the input in quotes for an exact phrase search.",
+          annotations: {
+            readOnlyHint: true,
+            destructiveHint: false,
+          },
+          inputSchema: {
+            type: "object",
+            properties: {
+              caseNumber: {
+                type: "string",
+                description: "Case number, docket number or BGE citation to search for",
+              },
+              language: {
+                type: "string",
+                enum: ["de", "fr", "it"],
+                description: "Preferred display language",
+              },
+              languageFilter: {
+                type: "array",
+                items: { type: "string", enum: ["de", "fr", "it"] },
+                description: "Filter by document language(s)",
+              },
+              dateFrom: {
+                type: "string",
+                format: "date",
+                description: "Start decision date filter (ISO 8601 format: YYYY-MM-DD)",
+              },
+              dateTo: {
+                type: "string",
+                format: "date",
+                description: "End decision date filter (ISO 8601 format: YYYY-MM-DD)",
+              },
+              scrapeDateFrom: {
+                type: "string",
+                format: "date",
+                description: "Start scrape date filter (ISO 8601 format: YYYY-MM-DD)",
+              },
+              scrapeDateTo: {
+                type: "string",
+                format: "date",
+                description: "End scrape date filter (ISO 8601 format: YYYY-MM-DD)",
+              },
+              cantons: {
+                type: "array",
+                items: { type: "string" },
+                description: "Optional canton or hierarchy filter",
+              },
+              limit: {
+                type: "number",
+                minimum: 1,
+                maximum: 100,
+                default: 20,
+                description: "Maximum number of results to return",
+              },
+              from: {
+                type: "number",
+                minimum: 0,
+                description: "Offset for pagination",
+              },
+              searchAfter: {
+                type: "array",
+                description: "Cursor from previous response's nextCursor",
+              },
+            },
+            required: ["caseNumber"],
+          },
+        },
+        {
+          name: "list_hierarchy",
+          description:
+            "List available court/chamber hierarchy IDs with hit counts. Use the IDs as cantons/courts filters in search_decisions and search_canton.",
+          annotations: {
+            readOnlyHint: true,
+            destructiveHint: false,
+          },
+          inputSchema: {
+            type: "object",
+            properties: {
+              query: {
+                type: "string",
+                default: "*",
+                description: "Optional full-text query to restrict hierarchy counts",
+              },
+              size: {
+                type: "number",
+                minimum: 1,
+                maximum: 10000,
+                default: 1000,
+                description: "Maximum number of hierarchy entries to return",
+              },
+            },
+          },
+        },
+        {
+          name: "list_facets",
+          description:
+            "Return the hierarchical facet tree of cantons, courts and chambers with localized labels (de/fr/it). Use list_hierarchy for hit counts.",
+          annotations: {
+            readOnlyHint: true,
+            destructiveHint: false,
+          },
+          inputSchema: {
+            type: "object",
+            properties: {},
           },
         },
         {
@@ -1271,11 +1549,8 @@ async function main() {
               },
               cantons: {
                 type: "array",
-                items: {
-                  type: "string",
-                  enum: ["ZH", "BE", "GE", "BS", "VD", "TI"],
-                },
-                description: "Filter by specific cantons",
+                items: { type: "string" },
+                description: "Filter by specific cantons (all 26 cantons accepted)",
               },
               dateFrom: {
                 type: "string",
@@ -1401,6 +1676,46 @@ async function main() {
       if (name === "search_canton") {
         const cantonParams = args as unknown as CantonSearchParams;
         const result = await searchCanton(cantonParams);
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(result, null, 2),
+            },
+          ],
+        };
+      }
+
+      if (name === "search_by_case_number") {
+        const { caseNumber, ...filters } = args as unknown as {
+          caseNumber: string;
+        } & SearchParams;
+        const result = await searchByCaseNumber(caseNumber, filters);
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(result, null, 2),
+            },
+          ],
+        };
+      }
+
+      if (name === "list_hierarchy") {
+        const { query, size } = args as unknown as { query?: string; size?: number };
+        const result = await listHierarchy(query, size);
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(result, null, 2),
+            },
+          ],
+        };
+      }
+
+      if (name === "list_facets") {
+        const result = await listFacets();
         return {
           content: [
             {
