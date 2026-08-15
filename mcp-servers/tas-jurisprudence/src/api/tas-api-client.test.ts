@@ -360,6 +360,28 @@ describe('getAwardDetails', () => {
     expect(lookupUrl).not.toContain('CAS');
   });
 
+  it('matches short case numbers without the zero-padding normalization adds', async () => {
+    const fetchSpy = makeFetchSpy({
+      '/SearchCaseLawDocument': () =>
+        jsonResponse({
+          currentPage: 1, totalPages: 1, pageSize: 25, totalCount: 1,
+          hasPrevious: false, hasNext: false,
+          items: [{ ...sampleSearchItem(), title: '2023/ADD/62', guid: 'g-62' }]
+        }),
+      '/CaseLawDocument/g-62': () => jsonResponse(sampleDetail({ guid: 'g-62', fileName: '62.pdf' }))
+    });
+
+    // Normalizes to "CAS 2023/ADD/0062" internally; site title is unpadded.
+    const result = await getAwardDetails('CAS 2023/ADD/62');
+
+    expect(result.found).toBe(true);
+    const lookupUrl = String(
+      fetchSpy.mock.calls.find((c) => String(c[0]).includes('/SearchCaseLawDocument'))![0]
+    );
+    expect(lookupUrl).toContain('Content=2023%2FADD%2F62');
+    expect(result.award!.pdf_url).toBe('https://jurisprudence.tas-cas.org/pdf/62.pdf');
+  });
+
   it('rejects invalid case_number input with a clear error', async () => {
     const result = await getAwardDetails('not a case number');
     expect(result.found).toBe(false);

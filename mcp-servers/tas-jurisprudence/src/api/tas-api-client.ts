@@ -491,23 +491,28 @@ async function fetchDetail(guid: string): Promise<TasDetail> {
  */
 async function findGuidByCaseNumber(caseNumber: string): Promise<string | null> {
   // The site's record titles are the bare number ("2023/A/10168") without
-  // the "CAS " prefix our normalization adds — strip it before querying so
-  // the exact-title comparison below can actually succeed.
+  // the "CAS " prefix our normalization adds, and without the zero-padding
+  // it applies ("2023/ADD/62", not "2023/ADD/0062"). Query and compare with
+  // the site's unpadded form.
   const bare = caseNumber
     .replace(/^\s*CAS\s+/i, '')
     .replace(/\s*&\s*\d+(?:-\d+)?$/, '')
     .trim();
-  const url = `${API_BASE}/CaseLawDocument/SearchCaseLawDocument?Content=${encodeURIComponent(bare)}&CurrentPage=1&PageSize=25`;
+  const unpadded = bare.replace(/\/0+(\d+)/, '/$1');
+  const url = `${API_BASE}/CaseLawDocument/SearchCaseLawDocument?Content=${encodeURIComponent(unpadded)}&CurrentPage=1&PageSize=25`;
   const response = await apiFetchJson<TasSearchResponse>(url);
   const items = response.items ?? [];
-  const exact = items.find((it) => it.title === bare);
+  const exact = items.find((it) => {
+    const t = (it.title ?? '').trim();
+    return t === bare || t === unpadded;
+  });
   if (exact) return exact.guid;
 
   // Try match on first number for compound ranges.
-  const firstNumMatch = bare.match(/(\d{4})\/([A-Z]{1,4})\/(\d+)/i);
+  const firstNumMatch = unpadded.match(/(\d{4})\/([A-Z]{1,4})\/(\d+)/i);
   if (firstNumMatch) {
     const needle = firstNumMatch[0];
-    const byNeedle = items.find((it) => (it.title ?? '').startsWith(needle));
+    const byNeedle = items.find((it) => (it.title ?? '').trim().startsWith(needle));
     if (byNeedle) return byNeedle.guid;
   }
   return null;
