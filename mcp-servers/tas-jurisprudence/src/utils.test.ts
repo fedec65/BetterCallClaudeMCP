@@ -14,8 +14,12 @@ describe('normalizeCaseNumber', () => {
     expect(normalizeCaseNumber('CAS 2022/A/9328 & 9329')).toBe('CAS 2022/A/9328 & 9329');
   });
 
-  it('accepts case number ranges', () => {
-    expect(normalizeCaseNumber('CAS 2022/A/8865-8868')).toBe('CAS 2022/A/8865 & 8868');
+  it('accepts case number ranges and preserves the range notation', () => {
+    expect(normalizeCaseNumber('CAS 2022/A/8865-8868')).toBe('CAS 2022/A/8865-8868');
+  });
+
+  it('still treats hyphens between components as separators', () => {
+    expect(normalizeCaseNumber('2023-A-9876')).toBe('CAS 2023/A/9876');
   });
 
   it('still rejects malformed input', () => {
@@ -39,6 +43,12 @@ describe('parseCaseNumber', () => {
     const parsed = parseCaseNumber('CAS 2022/A/9328 & 9329');
     expect(parsed.number).toBe(9328);
     expect(parsed.normalized).toBe('CAS 2022/A/9328 & 9329');
+  });
+
+  it('parses ranges keeping the first number', () => {
+    const parsed = parseCaseNumber('CAS 2022/A/8865-8868');
+    expect(parsed.number).toBe(8865);
+    expect(parsed.normalized).toBe('CAS 2022/A/8865-8868');
   });
 });
 
