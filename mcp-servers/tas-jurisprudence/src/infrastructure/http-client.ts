@@ -29,6 +29,21 @@ export class HttpError extends Error {
 }
 
 /**
+ * Reduce an upstream error body to a single short line before it is echoed
+ * into client-visible error messages: strip HTML tags, collapse whitespace
+ * and cap the length so upstream HTML error pages or stack traces are not
+ * relayed verbatim to MCP clients.
+ */
+function sanitizeErrorDetail(body: string): string {
+  const noTags = body.replace(/<[^>]+>/g, ' ');
+  const firstMeaningfulLine = noTags
+    .split(/\r?\n/)
+    .map((line) => line.replace(/\s+/g, ' ').trim())
+    .find((line) => line.length > 0);
+  return (firstMeaningfulLine ?? '').slice(0, 120);
+}
+
+/**
  * Create a fetch request with timeout and default headers
  */
 export async function httpFetch(
@@ -58,8 +73,19 @@ export async function httpFetch(
     });
 
     if (!response.ok) {
+      // Surface a short excerpt of the upstream error body (e.g. the JSON
+      // API's "Content field is required") so callers can diagnose 4xx
+      // responses without an extra round-trip.
+      let detail = '';
+      try {
+        const text = await response.text();
+        detail = sanitizeErrorDetail(text);
+      } catch {
+        // ignore: response body unreadable
+      }
+      const suffix = detail ? ` — ${detail}` : '';
       throw new HttpError(
-        `HTTP ${response.status}: ${response.statusText}`,
+        `HTTP ${response.status}: ${response.statusText}${suffix}`,
         response.status,
         url
       );

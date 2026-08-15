@@ -118,16 +118,26 @@ export class RateLimiter {
 // ============================================================================
 
 /**
- * Main rate limiter for jurisprudence.tas-cas.org
- * Respects 10-second crawl-delay from robots.txt
+ * Minimum interval between calls to the jurisprudence.tas-cas.org JSON API.
+ *
+ * The previous 10s value came from the HTML crawl-delay in robots.txt and
+ * was tuned for the Angular SPA scrape. The public JSON endpoint accepts
+ * normal client traffic, so a 1s floor is a courteous default. Change this
+ * constant in one place to retune.
+ *
+ * Overridable via the `TAS_API_MIN_INTERVAL_MS` env var — tests set it to
+ * `0` so the limiter becomes effectively a no-op and the suite runs fast.
  */
-export const jurisprudenceRateLimiter = new RateLimiter(10000, 1);
+export const TAS_API_MIN_INTERVAL_MS = (() => {
+  const raw = process.env.TAS_API_MIN_INTERVAL_MS;
+  const parsed = raw === undefined || raw === '' ? NaN : Number(raw);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : 1000;
+})();
 
 /**
- * Rate limiter for tas-cas.org (recent decisions, etc.)
- * More lenient - 2 second delay
+ * Main rate limiter for jurisprudence.tas-cas.org (JSON API).
  */
-export const tasCasRateLimiter = new RateLimiter(2000, 1);
+export const jurisprudenceRateLimiter = new RateLimiter(TAS_API_MIN_INTERVAL_MS, 1);
 
 /**
  * Execute a function with rate limiting
