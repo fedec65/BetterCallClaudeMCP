@@ -129,10 +129,17 @@ export const recentCache = new Cache<any>(5 * 60 * 1000, 10);
  */
 export const sportCache = new Cache<any>(15 * 60 * 1000, 50);
 
+/**
+ * New-site (www.tas-cas.org) recent-decisions index cache - 30 minute TTL
+ * The relaunched site's jurisprudence pages change infrequently.
+ */
+export const newSiteCache = new Cache<any>(30 * 60 * 1000, 5);
+
 // Periodic cleanup interval (every 5 minutes)
 setInterval(() => {
   searchCache.cleanup();
   awardCache.cleanup();
   recentCache.cleanup();
   sportCache.cleanup();
+  newSiteCache.cleanup();
 }, 5 * 60 * 1000);

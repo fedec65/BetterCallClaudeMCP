@@ -112,11 +112,14 @@ Uses the shared aggregator:
 - Award details: 30 minutes
 - Recent decisions: 5 minutes
 - Sport browse: 15 minutes
+- New-site recent-decisions index: 30 minutes
 
 ### Data Sources
-- Main database: `jurisprudence.tas-cas.org` (JavaScript-rendered)
-- Recent decisions: `tas-cas.org/en/jurisprudence/recent-decisions.html`
-- PDF files: `tas-cas.org/files/decision/`
+- Categorized database (JSON API): `jurisprudence.tas-cas.org` — awards up to April 2024; the API has not received new awards since (migration to the relaunched website pending)
+- Recent decisions, not yet categorized: `tas-cas.org/{en,fr,es}/jurisprudence/recent-decisions` and `tas-cas.org/en/add/jurisprudence` — scraped HTML pages merged into `cas_recent`, and used as fallback by `cas_get_award` and unfiltered `cas_search`. These awards expose metadata + `pdf_url` only: **no decision date or sport is available** for them.
+- PDF files: linked directly from both sources
+
+Sport and procedure-type filters only cover the categorized database; filtered `cas_search` queries never fall back to the recent-decisions pages.
 
 ## Legal Notice
 

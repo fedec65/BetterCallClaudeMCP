@@ -225,7 +225,7 @@ export const DEFAULT_SCRAPER_CONFIG: ScraperConfig = {
 export const TOOL_DEFINITIONS = [
   {
     name: 'cas_search',
-    description: 'Search CAS/TAS (Court of Arbitration for Sport) arbitration decisions by keywords, sport, year range, or procedure type. Returns case summaries with links to full awards.',
+    description: 'Search CAS/TAS (Court of Arbitration for Sport) arbitration decisions by keywords, sport, year range, or procedure type. Returns case summaries with links to full awards. Also covers recent awards not yet categorized in the main database (metadata and pdf_url only) when no sport/procedure filter is applied.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -248,7 +248,7 @@ export const TOOL_DEFINITIONS = [
   },
   {
     name: 'cas_get_award',
-    description: 'Retrieve detailed information about a specific CAS/TAS award including parties, arbitrators, keywords, and a PDF link. The full text is available in the linked PDF (`pdf_url`); the `include_full_text` flag is accepted for backward compatibility but is a no-op. Use case number like "CAS 2023/A/9876" or provide the award URL.',
+    description: 'Retrieve detailed information about a specific CAS/TAS award including parties, arbitrators, keywords, and a PDF link. The full text is available in the linked PDF (`pdf_url`); the `include_full_text` flag is accepted for backward compatibility but is a no-op. Awards not yet categorized in the main database (published since the 2025 website relaunch) are resolved from the recent-decisions pages with pdf_url only. Use case number like "CAS 2023/A/9876" or provide the award URL.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -266,7 +266,7 @@ export const TOOL_DEFINITIONS = [
   },
   {
     name: 'cas_recent',
-    description: 'Get the most recent CAS/TAS arbitration decisions. Returns a list of the latest published awards with basic information and PDF links.',
+    description: 'Get the most recent CAS/TAS arbitration decisions. Returns a list of the latest published awards with basic information and PDF links. Includes not-yet-categorized recent awards from the CAS website, which are returned without a decision date.',
     inputSchema: {
       type: 'object' as const,
       properties: {
