@@ -4,6 +4,8 @@
  */
 
 import Joi from 'joi';
+import { homedir, platform } from 'node:os';
+import { join } from 'node:path';
 
 export type Environment = 'development' | 'staging' | 'production' | 'test';
 export type DatabaseType = 'postgres' | 'sqlite';
@@ -125,6 +127,25 @@ const configSchema = Joi.object<AppConfig>({
 });
 
 /**
+ * Default on-disk location for the SQLite scrape cache.
+ *
+ * The database only holds data that can be re-fetched from upstream sources,
+ * so it lives under the user's cache directory (XDG_CACHE_HOME, or
+ * %LOCALAPPDATA% on Windows) instead of a path relative to process.cwd() —
+ * MCP hosts typically launch stdio servers with the user's project directory
+ * as cwd, and a relative default would litter every project with its own
+ * data/bettercallclaude.db.
+ */
+export function defaultDatabasePath(): string {
+  const cacheHome =
+    process.env.XDG_CACHE_HOME ||
+    (platform() === 'win32'
+      ? process.env.LOCALAPPDATA || join(homedir(), 'AppData', 'Local')
+      : join(homedir(), '.cache'));
+  return join(cacheHome, 'bettercallclaude', 'bettercallclaude.db');
+}
+
+/**
  * Load configuration from environment variables
  */
 export function loadConfig(): AppConfig {
@@ -135,7 +156,7 @@ export function loadConfig(): AppConfig {
       type: (process.env.DB_TYPE as DatabaseType) || 'sqlite',
       host: process.env.DB_HOST,
       port: process.env.DB_PORT ? parseInt(process.env.DB_PORT) : undefined,
-      database: process.env.DB_DATABASE || './data/bettercallclaude.db',
+      database: process.env.DB_DATABASE || defaultDatabasePath(),
       username: process.env.DB_USERNAME,
       password: process.env.DB_PASSWORD,
       poolSize: process.env.DB_POOL_SIZE ? parseInt(process.env.DB_POOL_SIZE) : 10,

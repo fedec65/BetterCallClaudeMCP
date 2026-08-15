@@ -433,4 +433,54 @@ describe('search_commentaries', () => {
       expect(result).toBeDefined();
     });
   });
+
+  describe('response shape handling', () => {
+    const commentary = {
+      id: 'uuid-1',
+      title: 'Art. 10 DSG',
+      authors: ['Michèle Balthasar'],
+      legislative_act: { id: 'dsg-uuid', name: 'Datenschutzgesetz', abbreviation: 'DSG' },
+      language: 'de',
+      updated: '2024-01-15',
+      url: 'https://onlinekommentar.ch/de/kommentare/dsg-10',
+    };
+
+    afterEach(() => {
+      vi.unstubAllGlobals();
+    });
+
+    it('should map the Laravel pagination envelope {data, links, meta}', async () => {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockResolvedValue({
+          ok: true,
+          json: async () => ({
+            data: [commentary],
+            links: { first: '...', last: '...' },
+            meta: { total: 20, current_page: 1, last_page: 1 },
+          }),
+        })
+      );
+
+      const result = await client.searchCommentaries('DSG');
+
+      expect(result.count).toBe(20);
+      expect(result.commentaries).toHaveLength(1);
+      expect(result.commentaries[0].title).toBe('Art. 10 DSG');
+    });
+
+    it('should fail loudly on an unrecognized response shape instead of returning an empty result', async () => {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockResolvedValue({
+          ok: true,
+          json: async () => ({ something: 'unexpected' }),
+        })
+      );
+
+      await expect(client.searchCommentaries('DSG')).rejects.toThrow(
+        /Unrecognized commentary search response/
+      );
+    });
+  });
 });

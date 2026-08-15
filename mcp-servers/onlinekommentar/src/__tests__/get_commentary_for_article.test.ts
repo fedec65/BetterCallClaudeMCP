@@ -174,6 +174,45 @@ describe('get_commentary_for_article', () => {
   });
 
   describe('legislative act resolution', () => {
+    it('should fall back to title search when the legislative-acts endpoint is unavailable (404)', async () => {
+      client.setLegislativeActMapping({});
+      vi.spyOn(client, 'listLegislativeActs').mockRejectedValue(
+        new Error('API error: 404 Not Found')
+      );
+
+      vi.spyOn(client, 'searchCommentaries').mockResolvedValue({
+        count: 2,
+        page: 1,
+        total_pages: 1,
+        commentaries: [
+          {
+            id: 'u1',
+            title: 'Art. 10 DSG',
+            authors: ['Michèle Balthasar'],
+            legislative_act: { id: 'dsg-uuid', name: 'Datenschutzgesetz', abbreviation: 'DSG' },
+            language: 'de',
+            updated: '2024-01-15',
+            url: 'https://onlinekommentar.ch/de/kommentare/dsg-10',
+          },
+          {
+            id: 'u2',
+            title: 'Art. 47a DSG',
+            authors: ['Other Author'],
+            legislative_act: { id: 'dsg-uuid', name: 'Datenschutzgesetz', abbreviation: 'DSG' },
+            language: 'de',
+            updated: '2024-01-15',
+            url: 'https://onlinekommentar.ch/de/kommentare/dsg-47a',
+          },
+        ],
+      });
+
+      const result = await client.getCommentaryForArticle('Art. 10 DSG', 'de');
+
+      expect(result.commentaries).toHaveLength(1);
+      expect(result.commentaries[0].title).toBe('Art. 10 DSG');
+      expect(result.count).toBe(1);
+    });
+
     it('should resolve OR to correct UUID', async () => {
       const mockResponse: SearchResult = {
         count: 1,
@@ -319,16 +358,25 @@ describe('get_commentary_for_article', () => {
       );
     });
 
-    it('should throw error for unknown legislative act', async () => {
+    it('should fall back to title search and return empty result for unknown legislative act', async () => {
       // Clear the mapping to test unknown act
       client.setLegislativeActMapping({});
 
       // Mock listLegislativeActs to return empty
       vi.spyOn(client, 'listLegislativeActs').mockResolvedValue([]);
 
-      await expect(
-        client.getCommentaryForArticle('Art. 1 UNKNOWN')
-      ).rejects.toThrow('Unknown legislative act: UNKNOWN');
+      // Mock the fallback search (no commentary titled "Art. 1 UNKNOWN")
+      vi.spyOn(client, 'searchCommentaries').mockResolvedValue({
+        commentaries: [],
+        count: 0,
+        page: 1,
+        total_pages: 0,
+      });
+
+      const result = await client.getCommentaryForArticle('Art. 1 UNKNOWN');
+
+      expect(result.commentaries).toEqual([]);
+      expect(result.count).toBe(0);
     });
 
     it('should handle API errors gracefully', async () => {

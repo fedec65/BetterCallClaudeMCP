@@ -212,12 +212,6 @@ export function createLegalCitationsServer(): Server {
         inputSchema: { type: 'object', properties: { text: { type: 'string' }, targetLanguage: { type: 'string', enum: ['de', 'fr', 'it', 'en'] }, format: { type: 'string', enum: ['short', 'long', 'academic'] }, includeFullNames: { type: 'boolean' } }, required: ['text', 'targetLanguage'] },
       },
       {
-        name: 'compare_citation_versions',
-        description: 'Compare different versions of a statutory provision over time.',
-        annotations: { readOnlyHint: true, destructiveHint: false },
-        inputSchema: { type: 'object', properties: { statute: { type: 'string' }, article: { type: 'number' }, paragraph: { type: 'number' }, dateFrom: { type: 'string' }, dateTo: { type: 'string' }, language: { type: 'string', enum: ['de', 'fr', 'it'] } }, required: ['statute', 'article'] },
-      },
-      {
         name: 'review_citations',
         description: 'Review all legal citations in a document: extract, validate, classify (green/yellow/red), and propose corrections. Composes extract_citations + validate_citation + format_citation. Returns an interactive citation validation panel for MCP Apps clients.',
         annotations: { readOnlyHint: true, destructiveHint: false },
@@ -319,19 +313,18 @@ export function createLegalCitationsServer(): Server {
         }
 
         case 'compare_citation_versions': {
-          const { statute, article, paragraph, dateFrom, dateTo, language = 'de' } = args as any;
+          // Not implemented: Fedlex exposes no documented historical-versions
+          // API. Fail loudly instead of returning fabricated placeholder text
+          // under success:true (issue #36). The tool is not advertised; this
+          // case only gives legacy callers an honest error.
+          const { statute } = args as { statute?: string };
+          const { article } = args as { article?: number };
           if (!statute) throw new McpError(ErrorCode.InvalidParams, 'statute required');
           if (typeof article !== 'number') throw new McpError(ErrorCode.InvalidParams, 'article must be a number');
-          const norm = statute.toUpperCase();
-          const sr = STATUTE_SR_MAPPING[norm] || STATUTE_SR_MAPPING[statute];
-          if (!sr) throw new McpError(ErrorCode.InvalidParams, `Unknown statute: ${statute}`);
-          const from = dateFrom ? new Date(dateFrom) : new Date('2000-01-01');
-          const to = dateTo ? new Date(dateTo) : new Date();
-          const ref = buildProvisionReference(norm, article, paragraph, undefined, language as Language);
-          return { content: [{ type: 'text', text: JSON.stringify({ success: true, provision: { statute: norm, srNumber: sr, article, paragraph, formattedCitation: ref }, dateRange: { from: from.toISOString().split('T')[0], to: to.toISOString().split('T')[0] }, versions: [
-            { effectiveDate: from.toISOString().split('T')[0], text: `[Historical version SR ${sr} Art. ${article}]`, changeType: 'initial', changeDescription: 'Original enactment' },
-            { effectiveDate: to.toISOString().split('T')[0], text: `[Current version SR ${sr} Art. ${article}]`, changeType: 'current', changeDescription: 'Current version in force' },
-          ], totalVersions: 2, hasChanges: true }, null, 2) }] };
+          throw new McpError(
+            ErrorCode.InternalError,
+            'compare_citation_versions is not implemented: Fedlex does not expose a documented historical-versions API. Use get_provision_text to retrieve the current consolidated text instead.'
+          );
         }
 
         case 'review_citations': {

@@ -79,8 +79,13 @@ function parseSearchResult($: cheerio.CheerioAPI, element: AnyNode): CasSearchRe
     // Build URL to decision page
     const url = `${BASE_URL}/decision/${year}/${procType}/${caseNumberText.padStart(4, '0')}`;
 
-    // Generate PDF URL
-    const pdfUrl = generatePdfUrl(caseNumberNormalized);
+    // Generate PDF URL (best-effort: unusual formats yield null, decision is kept)
+    let pdfUrl: string | null = null;
+    try {
+      pdfUrl = generatePdfUrl(caseNumberNormalized);
+    } catch {
+      // Keep the decision even if no PDF URL can be derived
+    }
 
     // Build snippet from outcome
     const snippet = outcome ? `Outcome: ${outcome}` : null;
@@ -111,6 +116,14 @@ function parseSearchResult($: cheerio.CheerioAPI, element: AnyNode): CasSearchRe
  */
 function mapProcedureType(text: string): CasSearchResult['procedure_type'] {
   const normalized = text.toLowerCase();
+  // Raw type codes from case numbers or table cells
+  switch (normalized) {
+    case 'a': return 'Appeal';
+    case 'o': return 'Ordinary';
+    case 'ad':
+    case 'add': return 'Anti-Doping';
+    case 'adv': return 'Advisory';
+  }
   if (normalized.includes('appeal') || normalized.includes('a/')) return 'Appeal';
   if (normalized.includes('ordinary') || normalized.includes('o/')) return 'Ordinary';
   if (normalized.includes('anti-doping') || normalized.includes('ad/')) return 'Anti-Doping';
@@ -343,11 +356,16 @@ export async function getAwardDetails(
         }
       });
 
-      // Extract procedure type from the case number (A = Appeal, O = Ordinary, AD = Anti-Doping)
+      // Extract procedure type from the case number (A = Appeal, O = Ordinary,
+      // AD = Ad hoc, ADD = Anti-Doping Division, ADV = Advisory)
       let procedureType: 'Appeal' | 'Ordinary' | 'Anti-Doping' | 'Advisory' | null = null;
       if (finalCaseNumber) {
-        const parsed = parseCaseNumber(finalCaseNumber);
-        procedureType = mapProcedureType(parsed.type);
+        try {
+          const parsed = parseCaseNumber(finalCaseNumber);
+          procedureType = mapProcedureType(parsed.type);
+        } catch {
+          // Keep default: raw/unusual case numbers leave procedure_type unset
+        }
       }
 
       // Extract arbitrators
@@ -392,8 +410,15 @@ export async function getAwardDetails(
         ? `${appellant} v. ${respondent}`
         : `CAS Decision ${finalCaseNumber}`;
 
-      // Generate PDF URL
-      const pdfUrl = finalCaseNumber ? generatePdfUrl(finalCaseNumber) : null;
+      // Generate PDF URL (best-effort: unusual formats yield empty, award is kept)
+      let pdfUrl = '';
+      if (finalCaseNumber) {
+        try {
+          pdfUrl = generatePdfUrl(finalCaseNumber);
+        } catch {
+          // Keep the award even if no PDF URL can be derived
+        }
+      }
 
       const award: CasAwardDetails = {
         case_number: caseNumFromPage || finalCaseNumber || 'Unknown',

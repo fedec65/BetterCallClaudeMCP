@@ -464,10 +464,11 @@ async function getRelatedDecisions(decisionId: string, limit: number = 5): Promi
     }
 
     // Convert Decision entities to API format (Date → string)
+    // (SQLite `date` columns hydrate as strings, not Date objects)
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const relatedDecisions = related.map((d: any) => ({
       ...d,
-      decisionDate: d.decisionDate.toISOString().split('T')[0],
+      decisionDate: new Date(d.decisionDate).toISOString().split('T')[0],
       signature: d.decisionId,
       court: d.courtLevel === 'federal' ? 'Bundesgericht' : (d.canton || 'Unknown'),
       score: 1.0,
@@ -559,16 +560,17 @@ async function getDecisionDetails(decisionId: string): Promise<{
       return { found: false, fromCache: false };
     }
 
-    const decision = await decisionRepo.findById(decisionId);
+    const decision = await decisionRepo.findByDecisionId(decisionId);
 
     if (!decision) {
       return { found: false, fromCache: false };
     }
 
     // Convert Decision entity to API format (Date → string)
+    // (SQLite `date` columns hydrate as strings, not Date objects)
     const apiDecision = {
       ...decision,
-      decisionDate: decision.decisionDate.toISOString().split('T')[0],
+      decisionDate: new Date(decision.decisionDate).toISOString().split('T')[0],
       signature: decision.decisionId,
       court: decision.courtLevel === 'federal' ? 'Bundesgericht' : (decision.canton || 'Unknown'),
       score: 1.0,

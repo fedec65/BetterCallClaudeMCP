@@ -183,7 +183,13 @@ class CourtLabelService {
   }
 
   private async fetchFacets(): Promise<Record<string, FacetFileNode>> {
-    const response = await fetch(`${this.baseUrl}/docs/Facetten_alle.json`);
+    // Bounded fetch: normalizeHit awaits this on every search, so a stalled
+    // remote file must not hang the whole search (no axios timeout here —
+    // this bypasses BaseAPIClient). On failure the caller falls back to the
+    // static court map.
+    const response = await fetch(`${this.baseUrl}/docs/Facetten_alle.json`, {
+      signal: AbortSignal.timeout(10000),
+    });
     if (!response.ok) {
       throw new Error(`Failed to load facets: ${response.status}`);
     }

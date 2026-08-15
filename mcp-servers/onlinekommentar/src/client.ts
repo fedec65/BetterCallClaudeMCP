@@ -145,6 +145,18 @@ export class OnlineKommentarClient {
       throw new Error(data.error);
     }
 
+    // Laravel-paginated shape { data: [...], links, meta } — observed live 2026-08
+    const raw = data as unknown as Record<string, unknown>;
+    if (Array.isArray(raw.data)) {
+      const meta = (raw.meta ?? {}) as Record<string, unknown>;
+      return this.validateSearchResult({
+        commentaries: raw.data,
+        count: typeof meta.total === 'number' ? meta.total : (raw.data as unknown[]).length,
+        page: typeof meta.current_page === 'number' ? meta.current_page : 1,
+        total_pages: typeof meta.last_page === 'number' ? meta.last_page : 1,
+      });
+    }
+
     // Handle both wrapped and unwrapped API responses
     if (data.data) {
       return this.validateSearchResult(data.data);
@@ -158,10 +170,17 @@ export class OnlineKommentarClient {
    * Validate and normalize SearchResult to prevent crashes from unexpected API shapes
    */
   private validateSearchResult(data: unknown): SearchResult {
-    if (typeof data !== 'object' || data === null) {
-      return { commentaries: [], count: 0, page: 1, total_pages: 0 };
+    if (typeof data !== 'object' || data === null || Array.isArray(data)) {
+      throw new Error(
+        'Unrecognized commentary search response (not an object) — refusing to fabricate an empty result'
+      );
     }
     const obj = data as Record<string, unknown>;
+    if (!('commentaries' in obj)) {
+      throw new Error(
+        `Unrecognized commentary search response shape (keys: ${Object.keys(obj).join(', ')}) — refusing to fabricate an empty result`
+      );
+    }
     return {
       commentaries: Array.isArray(obj.commentaries) ? obj.commentaries : [],
       count: typeof obj.count === 'number' ? obj.count : 0,
@@ -288,23 +307,54 @@ export class OnlineKommentarClient {
     // Get legislative act UUID
     let legislativeActId = this.legislativeActMapping[parsed.act.toLowerCase()];
 
-    // If not in cache, fetch legislative acts
     if (!legislativeActId) {
-      await this.listLegislativeActs();
-      legislativeActId = this.legislativeActMapping[parsed.act.toLowerCase()];
-    }
-
-    if (!legislativeActId) {
-      throw new Error(`Unknown legislative act: ${parsed.act}`);
+      try {
+        await this.listLegislativeActs();
+        legislativeActId = this.legislativeActMapping[parsed.act.toLowerCase()];
+      } catch (error) {
+        // Tolerate only the known case of the referential endpoint having
+        // been removed upstream (404) — fall through to the title-based
+        // fallback below. Transient failures (timeouts, network) must
+        // surface as errors, not as an empty result.
+        if (!(error instanceof Error && error.message.startsWith('API error: 404'))) {
+          throw error;
+        }
+      }
     }
 
     // Search for commentaries matching the article
     const searchQuery = `${parsed.article}${parsed.paragraph ? ` ${parsed.paragraph}` : ''}`;
 
-    return this.searchCommentaries(searchQuery, {
-      language,
-      legislative_act: legislativeActId,
-    });
+    if (legislativeActId) {
+      return this.searchCommentaries(searchQuery, {
+        language,
+        legislative_act: legislativeActId,
+      });
+    }
+
+    // Fallback without the acts referential: search by act abbreviation and
+    // filter titles on the stable "Art. <n> <ABBREV>" convention
+    // (parseArticleReference returns the article with its prefix, e.g. "Art. 13")
+    const articleNumber = String(parsed.article)
+      .replace(/^art\.?\s*/i, '')
+      .replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const articlePattern = new RegExp(`^art\\.?\\s*${articleNumber}\\b`, 'i');
+    const actPattern = new RegExp(`\\b${parsed.act}\\b`, 'i');
+
+    const filtered: Commentary[] = [];
+    const MAX_FALLBACK_PAGES = 5;
+    let totalPages = 1;
+    for (let p = 1; p <= Math.min(totalPages, MAX_FALLBACK_PAGES); p++) {
+      const result = await this.searchCommentaries(parsed.act, { language, page: p });
+      totalPages = result.total_pages || 1;
+      for (const c of result.commentaries || []) {
+        const title = String((c as { title?: unknown }).title ?? '');
+        if (articlePattern.test(title) && actPattern.test(title)) {
+          filtered.push(c);
+        }
+      }
+    }
+    return { commentaries: filtered, count: filtered.length, page: 1, total_pages: 1 };
   }
 
   /**

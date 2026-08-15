@@ -189,6 +189,11 @@ export class EntscheidSucheClient {
 
     const response = await this.post('/_search.php', body);
 
+    // post() returns null when the upstream endpoint answers 404
+    if (!response?.hits) {
+      return { entries: [], total: 0 };
+    }
+
     const total = typeof response.hits.total === 'number'
       ? response.hits.total
       : response.hits.total?.value || 0;

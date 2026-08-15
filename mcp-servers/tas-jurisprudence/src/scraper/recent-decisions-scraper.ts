@@ -63,8 +63,13 @@ function parseRecentDecision($: cheerio.CheerioAPI, element: AnyNode): CasRecent
     // Build URL to decision page
     const sourceUrl = `https://jurisprudence.tas-cas.org/decision/${year}/${procType}/${caseNumberText.padStart(4, '0')}`;
 
-    // Generate PDF URL
-    const pdfUrl = generatePdfUrl(caseNumberNormalized);
+    // Generate PDF URL (best-effort: unusual formats yield empty, decision is kept)
+    let pdfUrl = '';
+    try {
+      pdfUrl = generatePdfUrl(caseNumberNormalized);
+    } catch {
+      // Keep the decision even if no PDF URL can be derived
+    }
 
     return {
       case_number: caseNumber,
