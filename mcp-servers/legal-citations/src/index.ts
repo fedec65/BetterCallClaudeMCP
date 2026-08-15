@@ -26,6 +26,10 @@ import type { Language, FormatOptions, CitationComponents, CitationType, ParsedC
  */
 const FEDLEX_SPARQL_ENDPOINT = 'https://fedlex.data.admin.ch/sparqlendpoint';
 const FEDLEX_WEB_BASE = 'https://www.fedlex.admin.ch';
+// Bound all outbound Fedlex requests (the consolidated HTML alone is ~2.7 MB);
+// without a signal, node's fetch has no default timeout and a stalled host
+// hangs the tool call indefinitely.
+const FEDLEX_TIMEOUT_MS = Number(process.env.FEDLEX_TIMEOUT_MS) || 30_000;
 
 /**
  * Statute to SR number mapping for Fedlex API
@@ -396,45 +400,6 @@ class LegalCitationsMCPServer {
               }
             },
             required: ['text', 'targetLanguage']
-          }
-        },
-        {
-          name: 'compare_citation_versions',
-          description: 'Compare different versions of a statutory provision over time. Shows changes between versions with effective dates.',
-          annotations: {
-            readOnlyHint: true,
-            destructiveHint: false,
-          },
-          inputSchema: {
-            type: 'object',
-            properties: {
-              statute: {
-                type: 'string',
-                description: 'Statute abbreviation (e.g., "OR", "ZGB")'
-              },
-              article: {
-                type: 'number',
-                description: 'Article number'
-              },
-              paragraph: {
-                type: 'number',
-                description: 'Paragraph number (optional)'
-              },
-              dateFrom: {
-                type: 'string',
-                description: 'Start date for version comparison (ISO format)'
-              },
-              dateTo: {
-                type: 'string',
-                description: 'End date for version comparison (ISO format, default: today)'
-              },
-              language: {
-                type: 'string',
-                enum: ['de', 'fr', 'it'],
-                description: 'Language for provision text (default: de)'
-              }
-            },
-            required: ['statute', 'article']
           }
         }
       ]
@@ -860,6 +825,7 @@ class LegalCitationsMCPServer {
         'User-Agent': 'BetterCallClaude/1.1.0 (Legal Citations)',
       },
       body: new URLSearchParams({ query: sparqlQuery }).toString(),
+      signal: AbortSignal.timeout(FEDLEX_TIMEOUT_MS),
     });
 
     if (!sparqlResponse.ok) {
@@ -896,6 +862,7 @@ class LegalCitationsMCPServer {
         'User-Agent': 'BetterCallClaude/1.1.0 (Legal Citations)',
         Accept: 'text/html',
       },
+      signal: AbortSignal.timeout(FEDLEX_TIMEOUT_MS),
     });
 
     if (!htmlResponse.ok) {
@@ -1209,7 +1176,7 @@ class LegalCitationsMCPServer {
    * Compare provision versions over time
    */
   private async handleCompareCitationVersions(args: any) {
-    const { statute, article, paragraph, dateFrom, dateTo, language = 'de' } = args;
+    const { statute, article } = args;
 
     if (!statute || typeof statute !== 'string') {
       throw new McpError(
@@ -1226,8 +1193,7 @@ class LegalCitationsMCPServer {
     }
 
     // Normalize statute
-    const normalizedStatute = statute.toUpperCase();
-    const srNumber = STATUTE_SR_MAPPING[normalizedStatute] || STATUTE_SR_MAPPING[statute];
+    const srNumber = STATUTE_SR_MAPPING[statute.toUpperCase()] || STATUTE_SR_MAPPING[statute];
 
     if (!srNumber) {
       throw new McpError(
@@ -1236,92 +1202,16 @@ class LegalCitationsMCPServer {
       );
     }
 
-    // Parse dates
-    const fromDate = dateFrom ? new Date(dateFrom) : new Date('2000-01-01');
-    const toDate = dateTo ? new Date(dateTo) : new Date();
-
-    // In production, this would query Fedlex API for historical versions
-    // For now, return simulated version comparison data
-    const versions = await this.fetchProvisionVersions(
-      srNumber,
-      article,
-      paragraph,
-      fromDate,
-      toDate,
-      language
+    // Historical version comparison is not implemented: Fedlex exposes no
+    // documented API for version history. Fail loudly instead of returning
+    // fabricated placeholder text under success:true (issue #36). The tool
+    // is no longer advertised; this handler only gives legacy callers an
+    // honest error.
+    throw new McpError(
+      ErrorCode.InternalError,
+      'compare_citation_versions is not implemented: Fedlex does not expose a documented ' +
+      'historical-versions API. Use get_provision_text to retrieve the current consolidated text instead.'
     );
-
-    // Build formatted citation
-    const formattedCitation = this.buildProvisionReference(
-      normalizedStatute,
-      article,
-      paragraph,
-      undefined,
-      language as Language
-    );
-
-    return {
-      content: [
-        {
-          type: 'text',
-          text: JSON.stringify(
-            {
-              success: true,
-              provision: {
-                statute: normalizedStatute,
-                srNumber,
-                article,
-                paragraph,
-                formattedCitation
-              },
-              dateRange: {
-                from: fromDate.toISOString().split('T')[0],
-                to: toDate.toISOString().split('T')[0]
-              },
-              versions,
-              totalVersions: versions.length,
-              hasChanges: versions.length > 1
-            },
-            null,
-            2
-          )
-        }
-      ]
-    };
-  }
-
-  /**
-   * Fetch provision versions (simulated - would call Fedlex API in production)
-   */
-  private async fetchProvisionVersions(
-    srNumber: string,
-    article: number,
-    paragraph: number | undefined,
-    fromDate: Date,
-    toDate: Date,
-    language: string
-  ): Promise<Array<{
-    effectiveDate: string;
-    text: string;
-    changeType: 'initial' | 'amendment' | 'current';
-    changeDescription?: string;
-  }>> {
-    // In production, query Fedlex API for historical versions
-    // Return simulated data for demonstration
-    return [
-      {
-        effectiveDate: fromDate.toISOString().split('T')[0],
-        text: `[Historical version of SR ${srNumber} Art. ${article}${paragraph ? ` Abs. ${paragraph}` : ''} - would be fetched from Fedlex]`,
-        changeType: 'initial',
-        changeDescription: 'Original enactment'
-      },
-      {
-        effectiveDate: toDate.toISOString().split('T')[0],
-        text: `[Current version of SR ${srNumber} Art. ${article}${paragraph ? ` Abs. ${paragraph}` : ''} - would be fetched from Fedlex]`,
-        changeType: 'current',
-        changeDescription: 'Current version in force'
-      }
-    ];
   }
 
   async run(): Promise<void> {
@@ -1330,7 +1220,7 @@ class LegalCitationsMCPServer {
 
     console.error('Legal Citations MCP server running on stdio');
     console.error('Version: 1.1.0');
-    console.error('Capabilities: validate_citation, format_citation, convert_citation, parse_citation, get_provision_text, extract_citations, standardize_document_citations, compare_citation_versions');
+    console.error('Capabilities: validate_citation, format_citation, convert_citation, parse_citation, get_provision_text, extract_citations, standardize_document_citations');
   }
 }
 
