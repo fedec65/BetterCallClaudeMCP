@@ -3,8 +3,35 @@
  * Tests: config/index.ts (getConfig, validateConfig)
  */
 
-import { describe, it, expect } from 'vitest';
-import { getConfig } from '../config/config';
+import { describe, it, expect, afterEach } from 'vitest';
+import { isAbsolute } from 'node:path';
+import { getConfig, defaultDatabasePath } from '../config/config';
+
+describe('defaultDatabasePath', () => {
+  const ORIGINAL_XDG = process.env.XDG_CACHE_HOME;
+  const ORIGINAL_DB = process.env.DB_DATABASE;
+
+  afterEach(() => {
+    if (ORIGINAL_XDG === undefined) delete process.env.XDG_CACHE_HOME;
+    else process.env.XDG_CACHE_HOME = ORIGINAL_XDG;
+    if (ORIGINAL_DB === undefined) delete process.env.DB_DATABASE;
+    else process.env.DB_DATABASE = ORIGINAL_DB;
+  });
+
+  it('should return an absolute path (never cwd-relative)', () => {
+    expect(isAbsolute(defaultDatabasePath())).toBe(true);
+  });
+
+  it('should place the database in the bettercallclaude cache directory', () => {
+    expect(defaultDatabasePath()).toContain('bettercallclaude');
+    expect(defaultDatabasePath().endsWith('bettercallclaude.db')).toBe(true);
+  });
+
+  it('should honor XDG_CACHE_HOME when set', () => {
+    process.env.XDG_CACHE_HOME = '/tmp/xdg-test-cache';
+    expect(defaultDatabasePath()).toBe('/tmp/xdg-test-cache/bettercallclaude/bettercallclaude.db');
+  });
+});
 
 describe('Configuration System', () => {
   describe('getConfig', () => {

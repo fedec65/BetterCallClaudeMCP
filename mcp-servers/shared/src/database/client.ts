@@ -12,6 +12,7 @@ import { readFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { mkdirSync, existsSync } from 'fs';
 import { randomUUID } from 'crypto';
+import { defaultDatabasePath } from '../config/config';
 
 export type DatabaseType = 'postgres' | 'sqlite';
 
@@ -104,7 +105,7 @@ export class DatabaseClient {
         // In-memory database for testing
         this.sqliteDb = new Database(':memory:');
       } else {
-        const filename = this.config.filename || join(process.cwd(), 'data', 'bettercallclaude.db');
+        const filename = this.config.filename || defaultDatabasePath();
 
         // Ensure directory exists
         const dir = dirname(filename);
@@ -348,7 +349,7 @@ export function createDatabaseClient(config?: Partial<DatabaseConfig>): Database
     database: process.env.DATABASE_NAME || 'bettercallclaude',
     user: process.env.DATABASE_USER || 'postgres',
     password: process.env.DATABASE_PASSWORD,
-    filename: process.env.DATABASE_FILE || join(process.cwd(), 'data', 'bettercallclaude.db'),
+    filename: process.env.DATABASE_FILE || defaultDatabasePath(),
     max: parseInt(process.env.DATABASE_POOL_MAX || '20'),
     min: parseInt(process.env.DATABASE_POOL_MIN || '2'),
     idleTimeoutMillis: parseInt(process.env.DATABASE_IDLE_TIMEOUT || '30000'),
