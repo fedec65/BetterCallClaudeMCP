@@ -1,5 +1,56 @@
 # Changelog
 
+## [Unreleased] — tas-jurisprudence JSON API rewrite
+
+### Changed
+
+- **`tas-jurisprudence`**: replaced the Jina Reader + Playwright/Chromium scrape
+  of the jurisprudence.tas-cas.org Angular SPA with a thin client over the
+  site's public JSON API. Drops Jina, Playwright, and Chromium from the deploy
+  image and the Docker build. Output shapes (`CasSearchOutput`,
+  `CasAwardOutput`, `CasRecentOutput`, `CasBySportOutput`) are unchanged — no
+  MCP-client update is required. Public tool names (`cas_search`,
+  `cas_get_award`, `cas_recent`, `cas_by_sport`) keep the same signatures.
+  - Data quality improvements: clean parties (no more "Representative(s):…"
+    contamination), populated `arbitrators` (President / Arbitrator role plus
+    nationality), populated `keywords` (nameEn with nameFr fallback), working
+    `pdf_url` pointing to a real `application/pdf` resource.
+  - `procedure_type` union in `CasSearchResult` and `CasAwardDetails` widens
+    to `'Appeal' | 'Ordinary' | 'Anti-Doping' | 'Advisory' | null`; unknown
+    site abbreviations now return `null` rather than being silently coerced.
+  - `normalizeCaseNumber` now accepts `C` (the site's abbreviation for
+    Advisory opinions) in addition to `A/O/AD/ADD/ADV`.
+  - API rate-limiter interval drops from 10s (HTML crawl-delay) to 1s,
+    overridable via `TAS_API_MIN_INTERVAL_MS`. Test suite overrides it to 0.
+  - `getRecentDecisions` no longer falls back to a Playwright re-try; the JSON
+    API's default ordering (decisionDate desc) is the single source of truth.
+  - `HttpError` now carries a short excerpt of the upstream error body so 4xx
+    responses from the JSON API are diagnosable without an extra round-trip.
+
+### Removed
+
+- `mcp-servers/tas-jurisprudence/src/scraper/jina-client.ts`
+- `mcp-servers/tas-jurisprudence/src/scraper/jina-client.test.ts`
+- `mcp-servers/tas-jurisprudence/src/scraper/playwright-client.ts`
+- `mcp-servers/tas-jurisprudence/src/scraper/recent-decisions-scraper.ts`
+- `playwright`, `cheerio`, `lru-cache` from `tas-jurisprudence/package.json`
+- `playwright` from `mcp-servers-http/package.json`
+- `playwright` / `playwright-core` / `chromium-bidi` externals from
+  `mcp-servers-http/esbuild.config.mjs`
+- Chromium installation step from `mcp-servers-http/Dockerfile`; base image
+  switches from `mcr.microsoft.com/playwright:v1.40.0-jammy` to plain
+  `node:22-slim`.
+- Startup Playwright browser-path debug logging from `index.ts`.
+- Dead helpers `generatePdfUrl` and `extractPdfUrl` from `utils.ts`.
+- Unused `tasCasRateLimiter` singleton.
+
+### Added
+
+- `mcp-servers/tas-jurisprudence/src/api/tas-api-client.ts`
+- `mcp-servers/tas-jurisprudence/src/api/tas-api-client.test.ts`
+- `mcp-servers/tas-jurisprudence/vitest.config.ts`
+- `mcp-servers/tas-jurisprudence/vitest.setup.ts`
+
 ## [1.2.0] — MCP Apps Phase 2 (Spec C-2)
 
 ### Added
