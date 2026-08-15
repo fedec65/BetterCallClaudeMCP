@@ -32,6 +32,22 @@ import { searchCache, awardCache, recentCache, sportCache } from '../infrastruct
 
 const API_BASE = DEFAULT_SCRAPER_CONFIG.baseUrl.replace(/\/$/, '');
 
+/**
+ * Parse an API date string without timezone drift. The site's decision
+ * dates come through as offset-less ISO strings (e.g. "2024-02-15T00:00:00")
+ * which JavaScript's `new Date()` interprets in the server's local
+ * timezone, so `.toISOString()` then shifts the day eastward of UTC. We
+ * preserve the calendar day by parsing the YYYY-MM-DD prefix directly.
+ */
+function parseApiDate(dateStr: string | null | undefined): string {
+  if (!dateStr) return '';
+  const s = String(dateStr);
+  const m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+  // Fall back to the generic formatter for non-ISO strings.
+  return formatDate(s);
+}
+
 // ============================================================================
 // Raw API response shapes (only the fields we read)
 // ============================================================================
@@ -238,7 +254,7 @@ function mapSearchItem(item: TasSearchItem): CasSearchResult | null {
   const appellant = item.appellants?.trim() || null;
   const respondent = item.respondents?.trim() || null;
   const sport = item.sportEn?.trim() || item.sportFr?.trim() || null;
-  const date = formatDate(item.decisionDate ?? '');
+  const date = parseApiDate(item.decisionDate);
   const outcome = item.outcome?.trim();
 
   return {
@@ -270,7 +286,7 @@ function mapDetail(detail: TasDetail, fallbackTitle: string): CasAwardDetails {
   const appellant = (detail.appellants ?? []).map((s) => s?.trim()).filter(Boolean).join(', ') || null;
   const respondent = (detail.respondents ?? []).map((s) => s?.trim()).filter(Boolean).join(', ') || null;
   const sport = detail.sport?.nameEn?.trim() || null;
-  const date = formatDate(detail.decisionDate ?? '');
+  const date = parseApiDate(detail.decisionDate);
 
   return {
     case_number: title,
@@ -355,6 +371,24 @@ function filtersAppliedFromInput(input: CasSearchInput): CasSearchOutput['filter
 }
 
 /**
+ * Empty result used when a requested filter (sport/procedure) cannot be
+ * resolved to an API GUID. Returning an empty set is safer than silently
+ * dropping the filter and returning the whole database as a "filtered"
+ * answer.
+ */
+function emptySearchResult(input: CasSearchInput): CasSearchOutput {
+  return {
+    results: [],
+    total: 0,
+    page: input.page,
+    page_size: input.page_size,
+    has_more: false,
+    query_used: input.query,
+    filters_applied: filtersAppliedFromInput(input)
+  };
+}
+
+/**
  * Search CAS decisions via the JSON API. Preserves the previous
  * `CasSearchOutput` shape and cache key (`search:${JSON.stringify(input)}`).
  */
@@ -372,13 +406,27 @@ export async function searchCasDecisions(input: CasSearchInput): Promise<CasSear
   }
   if (input.sport) {
     const sportGuid = await resolveSportGuid(input.sport);
-    if (sportGuid) params.set('Sports', sportGuid);
+    // An unrecognized sport must not silently degrade to an unfiltered
+    // search: the caller asked for one sport, returning the whole database
+    // would look like a valid filtered answer.
+    if (!sportGuid) {
+      const empty = emptySearchResult(input);
+      searchCache.set(cacheKey, empty);
+      return empty;
+    }
+    params.set('Sports', sportGuid);
   }
   if (input.procedure_type) {
     const abbr = PROCEDURE_TYPE_TO_ABBR[input.procedure_type];
     if (abbr) {
       const guid = await getProcedureGuid(abbr);
-      if (guid) params.set('Procedures', guid);
+      // Same contract as the sport filter above.
+      if (!guid) {
+        const empty = emptySearchResult(input);
+        searchCache.set(cacheKey, empty);
+        return empty;
+      }
+      params.set('Procedures', guid);
     }
   }
   if (input.year_from) params.set('StartDecisionDate', `${input.year_from}-01-01`);
@@ -442,7 +490,13 @@ async function fetchDetail(guid: string): Promise<TasDetail> {
  * Returns null when no exact title match is found.
  */
 async function findGuidByCaseNumber(caseNumber: string): Promise<string | null> {
-  const bare = caseNumber.replace(/\s*&\s*\d+(?:-\d+)?$/, '').trim();
+  // The site's record titles are the bare number ("2023/A/10168") without
+  // the "CAS " prefix our normalization adds — strip it before querying so
+  // the exact-title comparison below can actually succeed.
+  const bare = caseNumber
+    .replace(/^\s*CAS\s+/i, '')
+    .replace(/\s*&\s*\d+(?:-\d+)?$/, '')
+    .trim();
   const url = `${API_BASE}/CaseLawDocument/SearchCaseLawDocument?Content=${encodeURIComponent(bare)}&CurrentPage=1&PageSize=25`;
   const response = await apiFetchJson<TasSearchResponse>(url);
   const items = response.items ?? [];
@@ -582,11 +636,16 @@ export async function getRecentDecisions(limit: number = 10): Promise<CasRecentO
       } catch {
         normalized = `CAS ${title}`;
       }
+      const appellant = it.appellants?.trim() || null;
+      const respondent = it.respondents?.trim() || null;
       return {
         case_number: title,
         case_number_normalized: normalized,
-        title,
-        date: formatDate(it.decisionDate ?? ''),
+        title:
+          appellant && respondent
+            ? `${appellant} v. ${respondent}`
+            : `CAS Decision ${normalized}`,
+        date: parseApiDate(it.decisionDate),
         sport: it.sportEn?.trim() || it.sportFr?.trim() || null,
         pdf_url: buildPdfUrlFromTitle(title) ?? '',
         source_url: buildDeepLink(title, it.guid)

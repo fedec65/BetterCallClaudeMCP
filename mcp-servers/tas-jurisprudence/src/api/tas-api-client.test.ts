@@ -131,10 +131,14 @@ describe('searchCasDecisions', () => {
     expect(r.pdf_url).toBe('https://jurisprudence.tas-cas.org/pdf/10168.pdf');
     expect(r.snippet).toBe('Outcome: Appeal dismissed');
     expect(r.procedure_type).toBe('Appeal');
+    // Offset-less API dates must keep their calendar day (no TZ shift).
+    expect(r.date).toBe('2024-02-15');
   });
 
   it('omits Content for the wildcard "*" query', async () => {
     const fetchSpy = makeFetchSpy({
+      '/Sport/Search': () =>
+        jsonResponse({ items: [{ guid: 'sport-1', nameEn: 'Football', nameFr: 'Football' }] }),
       '/CaseLawDocument/SearchCaseLawDocument': () =>
         jsonResponse({
           currentPage: 1, totalPages: 1, pageSize: 25, totalCount: 0,
@@ -229,6 +233,45 @@ describe('searchCasDecisions', () => {
     expect(result.results[0].sport).toBeNull();
     expect(result.results[0].procedure_type).toBeNull();
   });
+
+  it('returns an empty result (no search fetch) when the sport cannot be resolved', async () => {
+    const fetchSpy = makeFetchSpy({
+      '/Sport/Search': () => jsonResponse({ items: [] }),
+      '/CaseLawDocument/SearchCaseLawDocument': () => {
+        throw new Error('search must not be called when the sport is unresolved');
+      }
+    });
+
+    const result = await searchCasDecisions({
+      query: '*', sport: 'Underwater Basket Weaving', page: 1, page_size: 10
+    });
+
+    expect(result.results).toEqual([]);
+    expect(result.total).toBe(0);
+    expect(result.filters_applied.sport).toBe('Underwater Basket Weaving');
+    expect(
+      fetchSpy.mock.calls.some((c) => String(c[0]).includes('/CaseLawDocument/SearchCaseLawDocument'))
+    ).toBe(false);
+  });
+
+  it('returns an empty result (no search fetch) when the procedure GUID is unknown', async () => {
+    const fetchSpy = makeFetchSpy({
+      '/AllCaseLawProcedures': () => jsonResponse([]),
+      '/CaseLawDocument/SearchCaseLawDocument': () => {
+        throw new Error('search must not be called when the procedure is unresolved');
+      }
+    });
+
+    const result = await searchCasDecisions({
+      query: 'foo', procedure_type: 'Appeal', page: 1, page_size: 10
+    });
+
+    expect(result.results).toEqual([]);
+    expect(result.total).toBe(0);
+    expect(
+      fetchSpy.mock.calls.some((c) => String(c[0]).includes('/CaseLawDocument/SearchCaseLawDocument'))
+    ).toBe(false);
+  });
 });
 
 describe('getAwardDetails', () => {
@@ -295,6 +338,28 @@ describe('getAwardDetails', () => {
     expect(result.award?.pdf_url).toBe('https://jurisprudence.tas-cas.org/pdf/10168.pdf');
   });
 
+  it('looks up by case number stripping the CAS prefix the site does not use', async () => {
+    const fetchSpy = makeFetchSpy({
+      '/SearchCaseLawDocument': () =>
+        jsonResponse({
+          currentPage: 1, totalPages: 1, pageSize: 25, totalCount: 1,
+          hasPrevious: false, hasNext: false,
+          items: [{ ...sampleSearchItem(), title: '2023/A/10168', guid: 'g-1' }]
+        }),
+      '/CaseLawDocument/g-1': () => jsonResponse(sampleDetail({ guid: 'g-1' }))
+    });
+
+    const result = await getAwardDetails('CAS 2023/A/10168');
+
+    expect(result.found).toBe(true);
+    const lookupUrl = String(
+      fetchSpy.mock.calls.find((c) => String(c[0]).includes('/SearchCaseLawDocument'))![0]
+    );
+    // Site titles have no "CAS " prefix — the query must send the bare number.
+    expect(lookupUrl).toContain('Content=2023%2FA%2F10168');
+    expect(lookupUrl).not.toContain('CAS');
+  });
+
   it('rejects invalid case_number input with a clear error', async () => {
     const result = await getAwardDetails('not a case number');
     expect(result.found).toBe(false);
@@ -322,6 +387,34 @@ describe('getRecentDecisions', () => {
     expect(result.decisions[0].pdf_url).toBe('https://jurisprudence.tas-cas.org/pdf/10168.pdf');
     expect(result.decisions[1].pdf_url).toBe('https://jurisprudence.tas-cas.org/pdf/9328.pdf');
     expect(result.decisions[0].source_url).toContain('details=g-1');
+  });
+
+  it('titles recent decisions with the parties when available', async () => {
+    makeFetchSpy({
+      '/SearchCaseLawDocument': () =>
+        jsonResponse({
+          currentPage: 1, totalPages: 1, pageSize: 5, totalCount: 2,
+          hasPrevious: false, hasNext: false,
+          items: [
+            sampleSearchItem({
+              guid: 'g-1',
+              title: '2023/A/10168',
+              appellants: 'Olympiacos FC',
+              respondents: 'FIFA'
+            }),
+            sampleSearchItem({ guid: 'g-2', title: '2022/A/9328', appellants: '', respondents: '' })
+          ]
+        })
+    });
+
+    const result = await getRecentDecisions(5);
+
+    expect(result.decisions[0].title).toBe('Olympiacos FC v. FIFA');
+    expect(result.decisions[0].case_number).toBe('2023/A/10168');
+    // No parties: fall back to a descriptive title instead of the bare number.
+    expect(result.decisions[1].title).toBe('CAS Decision CAS 2022/A/9328');
+    // Calendar day preserved, not shifted by TZ conversion.
+    expect(result.decisions[0].date).toBe('2024-02-15');
   });
 
   it('returns empty list with error source on upstream failure', async () => {
@@ -355,6 +448,31 @@ describe('resilience', () => {
       .rejects.toThrow(/upstream exploded/);
     expect(fetchSpy.mock.calls.length).toBeGreaterThanOrEqual(2);
     expect(fetchSpy.mock.calls.length).toBeLessThanOrEqual(3);
+  });
+
+  it('sanitizes HTML upstream error bodies before echoing them to the client', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        new Response(
+          '<html>\r\n<head><title>Upstream Oops</title></head>\r\n<body>Internal stack trace...</body>\r\n</html>',
+          { status: 500, statusText: 'Internal Server Error' }
+        )
+      )
+    );
+
+    const assertion = await searchCasDecisions({ query: 'foo', page: 1, page_size: 1 }).then(
+      () => null,
+      (err: unknown) => err as Error
+    );
+    expect(assertion).toBeInstanceOf(Error);
+    const msg = assertion!.message;
+    expect(msg).toContain('Upstream Oops');
+    // No raw HTML, no stack-trace body, single short line.
+    expect(msg).not.toContain('<');
+    expect(msg).not.toContain('Internal stack trace');
+    expect(msg.split('\n')).toHaveLength(1);
+    expect(msg.length).toBeLessThan(200);
   });
 });
 
