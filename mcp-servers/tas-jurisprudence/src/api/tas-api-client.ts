@@ -24,7 +24,9 @@ import type {
 import { normalizeCaseNumber, formatDate, retryWithBackoff, delay } from '../utils.js';
 import { fetchJson, HttpError } from '../infrastructure/http-client.js';
 import { withRateLimit, jurisprudenceRateLimiter } from '../infrastructure/rate-limiter.js';
-import { searchCache, awardCache, recentCache, sportCache } from '../infrastructure/cache.js';
+import { searchCache, awardCache, recentCache, sportCache, newSiteCache } from '../infrastructure/cache.js';
+import { getNewSiteIndex } from './recent-decisions-client.js';
+import type { NewSiteEntry } from './recent-decisions-client.js';
 
 // ============================================================================
 // Configuration
@@ -358,6 +360,103 @@ function apiFetchJson<T>(url: string): Promise<T> {
 }
 
 // ============================================================================
+// New-site (www.tas-cas.org) recent-decisions integration
+// ============================================================================
+
+/**
+ * The categorized API went stale in April 2024; awards published since the
+ * 2025-12-17 website relaunch exist only on the new site's recent-decisions
+ * pages. The helpers below merge/fall back to that index without changing
+ * the tool output shapes. New-site entries carry no date or sport metadata,
+ * so mapped results use `date: ''` and `sport: null` — no fabricated data.
+ */
+
+async function safeGetNewSiteIndex(): Promise<NewSiteEntry[]> {
+  // getNewSiteIndex is designed not to throw (per-page fault tolerance,
+  // empty array when every page fails); the catch is pure defense.
+  return getNewSiteIndex().catch(() => [] as NewSiteEntry[]);
+}
+
+function newSiteTitle(entry: NewSiteEntry): string {
+  return entry.parties ?? `CAS Decision ${entry.caseNumberNormalized}`;
+}
+
+function mapNewSiteEntryToSearchResult(entry: NewSiteEntry): CasSearchResult {
+  return {
+    case_number: entry.caseNumber,
+    case_number_normalized: entry.caseNumberNormalized,
+    title: newSiteTitle(entry),
+    sport: null,
+    procedure_type: null,
+    date: '',
+    parties: { appellant: null, respondent: null },
+    url: entry.pageUrl,
+    pdf_url: entry.pdfUrl,
+    snippet: null
+  };
+}
+
+function mapNewSiteEntryToAward(entry: NewSiteEntry): CasAwardDetails {
+  return {
+    case_number: entry.caseNumber,
+    case_number_normalized: entry.caseNumberNormalized,
+    title: newSiteTitle(entry),
+    sport: null,
+    procedure_type: null,
+    date: '',
+    parties: { appellant: null, respondent: null },
+    arbitrators: [],
+    keywords: [],
+    operative_part: null,
+    summary: null,
+    full_text: null,
+    pdf_url: entry.pdfUrl,
+    source_url: entry.pageUrl
+  };
+}
+
+function mapNewSiteEntryToRecent(entry: NewSiteEntry): CasRecentDecision {
+  return {
+    case_number: entry.caseNumber,
+    case_number_normalized: entry.caseNumberNormalized,
+    title: newSiteTitle(entry),
+    date: '',
+    sport: null,
+    pdf_url: entry.pdfUrl,
+    source_url: entry.pageUrl
+  };
+}
+
+/**
+ * Sort key for cas_recent merging. New-site items carry no decision date;
+ * to keep them roughly chronological they sort as if published at the end
+ * of their case-registration year (`YYYY-12-31`). This is a sort-only
+ * heuristic approximation — the returned `date` field itself stays ''.
+ */
+function recentSortKey(d: CasRecentDecision): string {
+  if (d.date) return d.date;
+  const m = d.case_number.match(/(\d{4})\//);
+  return m ? `${m[1]}-12-31` : '';
+}
+
+/**
+ * Case-insensitive substring match over the new-site index (case number +
+ * parties). Used as the cas_search fallback for unfiltered queries.
+ */
+async function searchNewSiteIndex(query: string): Promise<CasSearchResult[]> {
+  const q = query.trim().toLowerCase();
+  if (!q || q === '*') return [];
+  const index = await safeGetNewSiteIndex();
+  return index
+    .filter((e) =>
+      e.caseNumber.toLowerCase().includes(q) ||
+      e.caseNumberNormalized.toLowerCase().includes(q) ||
+      (e.parties ?? '').toLowerCase().includes(q)
+    )
+    .map(mapNewSiteEntryToSearchResult);
+}
+
+// ============================================================================
 // Public API
 // ============================================================================
 
@@ -441,14 +540,27 @@ export async function searchCasDecisions(input: CasSearchInput): Promise<CasSear
     .map(mapSearchItem)
     .filter((r): r is CasSearchResult => r !== null);
 
-  const total = typeof response.totalCount === 'number' ? response.totalCount : results.length;
+  let total = typeof response.totalCount === 'number' ? response.totalCount : results.length;
+  let finalResults = results;
+  let hasMore = response.hasNext ?? false;
+
+  // New-site fallback: awards published since the API went stale (2024+)
+  // exist only on the relaunched site's recent-decisions pages. Triggered
+  // only for UNFILTERED queries with zero API hits — sport/procedure
+  // filters are never silently widened onto a source that has no such
+  // metadata.
+  if (total === 0 && !input.sport && !input.procedure_type) {
+    finalResults = await searchNewSiteIndex(query);
+    total = finalResults.length;
+    hasMore = false;
+  }
 
   const output: CasSearchOutput = {
-    results,
+    results: finalResults,
     total,
     page: input.page,
     page_size: input.page_size,
-    has_more: response.hasNext ?? false,
+    has_more: hasMore,
     query_used: input.query,
     filters_applied: filtersAppliedFromInput(input)
   };
@@ -595,6 +707,17 @@ export async function getAwardDetails(
     }
 
     if (!guid) {
+      // Fall back to the new-site index: awards published since the API
+      // went stale (2024+) exist only on the recent-decisions pages.
+      if (normalized) {
+        const entry = (await safeGetNewSiteIndex())
+          .find((e) => e.caseNumberNormalized === normalized);
+        if (entry) {
+          const result: CasAwardOutput = { found: true, award: mapNewSiteEntryToAward(entry) };
+          awardCache.set(cacheKey, result);
+          return result;
+        }
+      }
       const result: CasAwardOutput = { found: false, award: null, error: 'Case not found' };
       awardCache.set(cacheKey, result);
       return result;
@@ -660,8 +783,23 @@ export async function getRecentDecisions(limit: number = 10): Promise<CasRecentO
       };
     });
 
+    // Merge in awards from the new-site index (2024+ awards not yet
+    // migrated into the categorized API). Entries already known to the API
+    // (by normalized case number) keep their API record with real metadata.
+    const newSiteEntries = await safeGetNewSiteIndex();
+    const known = new Set(decisions.map((d) => d.case_number_normalized));
+    const extras = newSiteEntries
+      .filter((e) => !known.has(e.caseNumberNormalized))
+      .map(mapNewSiteEntryToRecent);
+
+    // Sort by date desc; undated new-site items use the sort-only
+    // `${caseYear}-12-31` heuristic (see recentSortKey), then slice.
+    const merged = [...decisions, ...extras]
+      .sort((a, b) => recentSortKey(b).localeCompare(recentSortKey(a)))
+      .slice(0, safeLimit);
+
     const output: CasRecentOutput = {
-      decisions,
+      decisions: merged,
       retrieved_at: new Date().toISOString(),
       source: 'jurisprudence.tas-cas.org'
     };
@@ -690,4 +828,5 @@ void retryWithBackoff;
 export function __resetCachesForTest(): void {
   procedureMapPromise = null;
   sportCache.clear();
+  newSiteCache.clear();
 }
