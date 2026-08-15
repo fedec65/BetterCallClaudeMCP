@@ -127,6 +127,18 @@ describe('parseRecentDecisionsHtml', () => {
     expect(parseRecentDecisionsHtml(html, EN_URL, 'en')).toEqual([]);
   });
 
+  it('skips PDF hrefs resolving to a different host (strict www.tas-cas.org allowlist)', () => {
+    const html =
+      awardAnchor('https://evil.example.com/x.pdf', 'CAS 2025/A/11887 Lokeren v. FIFA') +
+      awardAnchor('https://www.tas-cas.org.evil.example.com/y.pdf', 'CAS 2025/A/11888 A v. B') +
+      awardAnchor('generated\\assets\\lists\\g\\ok.pdf', 'CAS 2025/A/11889 C v. D');
+    const entries = parseRecentDecisionsHtml(html, EN_URL, 'en');
+
+    expect(entries).toHaveLength(1);
+    expect(entries[0].caseNumberNormalized).toBe('CAS 2025/A/11889');
+    expect(entries[0].pdfUrl).toBe('https://www.tas-cas.org/generated/assets/lists/g/ok.pdf');
+  });
+
   it('tags entries with the page language (fr/es variants)', () => {
     const html = awardAnchor(
       'generated\\assets\\lists\\g\\100.pdf',
@@ -212,7 +224,20 @@ describe('getNewSiteIndex', () => {
     expect(index.map((e) => e.caseNumberNormalized)).toEqual(['CAS 2025/A/11887']);
   }, 15000);
 
-  it('returns [] and does NOT cache when every page fails (no negative caching)', async () => {
+  it('coalesces concurrent calls into a single fetch round per page', async () => {
+    const fetchSpy = makeFetchSpy(allPagesHandler({
+      'www.tas-cas.org/en/jurisprudence/recent-decisions': awardAnchor(
+        'generated\\assets\\lists\\g\\11887.pdf', 'CAS 2025/A/11887 Lokeren v. FIFA')
+    }));
+
+    const [a, b] = await Promise.all([getNewSiteIndex(), getNewSiteIndex()]);
+
+    expect(a).toBe(b);
+    // One fetch per page total, not per caller.
+    expect(fetchSpy).toHaveBeenCalledTimes(4);
+  });
+
+  it('caches a total failure briefly (~45s), then retries after the negative TTL', async () => {
     let down = true;
     const fetchSpy = vi.fn(async (): Promise<Response> => {
       if (down) throw new Error('site down');
@@ -224,12 +249,24 @@ describe('getNewSiteIndex', () => {
 
     const first = await getNewSiteIndex();
     expect(first).toEqual([]);
+    const callsAfterOutage = fetchSpy.mock.calls.length;
 
-    // Site recovers: the next call must refetch instead of serving the
-    // cached all-failure result.
+    // Immediate retry during the outage is served from the brief negative
+    // cache — no refetch storm.
+    await getNewSiteIndex();
+    expect(fetchSpy.mock.calls.length).toBe(callsAfterOutage);
+
+    // After the negative TTL expires the next call retries and recovers.
     down = false;
-    const second = await getNewSiteIndex();
-    expect(second).toHaveLength(1);
-    expect(second[0].caseNumberNormalized).toBe('CAS 2025/A/11887');
+    vi.useFakeTimers();
+    vi.setSystemTime(Date.now() + 46_000);
+    try {
+      const second = await getNewSiteIndex();
+      expect(second).toHaveLength(1);
+      expect(second[0].caseNumberNormalized).toBe('CAS 2025/A/11887');
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(fetchSpy.mock.calls.length).toBeGreaterThan(callsAfterOutage);
   }, 15000);
 });

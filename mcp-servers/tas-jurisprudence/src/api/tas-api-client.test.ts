@@ -498,7 +498,9 @@ describe('getRecentDecisions', () => {
 
     const result = await getRecentDecisions(5);
 
-    const requestedUrl = String(fetchSpy.mock.calls[0][0]);
+    const requestedUrl = String(
+      fetchSpy.mock.calls.find((c) => String(c[0]).includes('/SearchCaseLawDocument'))![0]
+    );
     expect(requestedUrl).toContain('OrderByColumn=DecisionDate');
     expect(requestedUrl).toContain('OrderByDirection=desc');
     // Decisions come back in date-desc order.
@@ -679,6 +681,23 @@ describe('new-site (www.tas-cas.org) integration', () => {
       expect(result.decisions).toHaveLength(1);
       expect(result.decisions[0].case_number).toBe('2023/A/10168');
     }, 15000);
+
+    it('still returns new-site awards when the categorized API is down', async () => {
+      makeFetchSpy({
+        ...newSiteHandlers(NEW_SITE_EN_PAGE),
+        '/SearchCaseLawDocument': () =>
+          new Response('boom', { status: 500, statusText: 'Server Error' })
+      });
+
+      const result = await getRecentDecisions(10);
+
+      expect(result.decisions).toHaveLength(1);
+      expect(result.decisions[0].case_number_normalized).toBe('CAS 2025/A/11887');
+      expect(result.decisions[0].pdf_url)
+        .toBe('https://www.tas-cas.org/generated/assets/lists/abc-guid/11887.pdf');
+      expect(result.source).toContain('www.tas-cas.org recent-decisions');
+      expect(result.source).toContain('categorized API unavailable');
+    });
   });
 
   describe('getAwardDetails fallback', () => {
@@ -795,6 +814,64 @@ describe('new-site (www.tas-cas.org) integration', () => {
       expect(
         fetchSpy.mock.calls.some((c) => String(c[0]).includes('www.tas-cas.org'))
       ).toBe(false);
+    });
+
+    it('never falls back for year-filtered queries (new-site entries carry no date)', async () => {
+      const fetchSpy = makeFetchSpy({
+        '/SearchCaseLawDocument': () =>
+          jsonResponse({
+            currentPage: 1, totalPages: 1, pageSize: 10, totalCount: 0,
+            hasPrevious: false, hasNext: false, items: []
+          }),
+        'www.tas-cas.org': () => {
+          throw new Error('new-site index must not be fetched for year-filtered queries');
+        }
+      });
+
+      const result = await searchCasDecisions({
+        query: 'Lokeren', year_from: 2024, year_to: 2026, page: 1, page_size: 10
+      });
+
+      expect(result.results).toEqual([]);
+      expect(result.total).toBe(0);
+      expect(
+        fetchSpy.mock.calls.some((c) => String(c[0]).includes('www.tas-cas.org'))
+      ).toBe(false);
+    });
+
+    it('paginates the new-site fallback results', async () => {
+      const manyEntries = Array.from({ length: 5 }, (_, i) =>
+        newSiteAnchor(
+          `generated\\assets\\lists\\g\\${i}.pdf`,
+          `CAS 2025/A/${11890 + i} Lokeren Club ${i} v. FIFA`
+        )
+      ).join('');
+      makeFetchSpy({
+        ...newSiteHandlers(manyEntries),
+        '/SearchCaseLawDocument': () =>
+          jsonResponse({
+            currentPage: 1, totalPages: 1, pageSize: 10, totalCount: 0,
+            hasPrevious: false, hasNext: false, items: []
+          })
+      });
+
+      const page1 = await searchCasDecisions({ query: 'Lokeren', page: 1, page_size: 2 });
+      expect(page1.results).toHaveLength(2);
+      expect(page1.total).toBe(5);
+      expect(page1.has_more).toBe(true);
+
+      const page2 = await searchCasDecisions({ query: 'Lokeren', page: 2, page_size: 2 });
+      expect(page2.results).toHaveLength(2);
+      expect(page2.total).toBe(5);
+      expect(page2.has_more).toBe(true);
+
+      const page1Numbers = page1.results.map((r) => r.case_number_normalized);
+      const page2Numbers = page2.results.map((r) => r.case_number_normalized);
+      expect(page1Numbers.every((n) => !page2Numbers.includes(n))).toBe(true);
+
+      const page3 = await searchCasDecisions({ query: 'Lokeren', page: 3, page_size: 2 });
+      expect(page3.results).toHaveLength(1);
+      expect(page3.has_more).toBe(false);
     });
   });
 });

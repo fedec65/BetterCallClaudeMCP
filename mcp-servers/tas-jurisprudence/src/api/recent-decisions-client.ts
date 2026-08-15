@@ -45,7 +45,22 @@ export interface NewSiteEntry {
 }
 
 const NEW_SITE_BASE = 'https://www.tas-cas.org/';
+const NEW_SITE_HOST = 'www.tas-cas.org';
 const NEW_SITE_CACHE_KEY = 'new-site:index';
+
+/**
+ * Page fetches get a shorter timeout and fewer attempts than the JSON API:
+ * an outage of the relaunched site must not stall tool calls for minutes.
+ */
+const NEW_SITE_PAGE_TIMEOUT_MS = 8000;
+const NEW_SITE_FETCH_ATTEMPTS = 2;
+
+/**
+ * How long a TOTAL fetch failure is cached as an empty index. Short enough
+ * to recover quickly after an outage, long enough that a burst of tool
+ * calls during an outage doesn't each pay the full retry cost.
+ */
+const NEW_SITE_NEGATIVE_TTL_MS = 45 * 1000;
 
 /**
  * Pages to scrape, in priority order: the English index first so cross-page
@@ -100,7 +115,10 @@ export function parseRecentDecisionsHtml(
 
     let pdfUrl: string;
     try {
-      pdfUrl = new URL(href, NEW_SITE_BASE).toString();
+      const resolved = new URL(href, NEW_SITE_BASE);
+      // Strict host allowlist: never emit pdf_urls pointing off-domain.
+      if (resolved.hostname !== NEW_SITE_HOST) return;
+      pdfUrl = resolved.toString();
     } catch {
       return;
     }
@@ -126,28 +144,22 @@ async function fetchPage(url: string): Promise<string> {
     retryWithBackoff(
       () =>
         fetchText(url, {
-          timeout: DEFAULT_SCRAPER_CONFIG.timeout,
+          timeout: NEW_SITE_PAGE_TIMEOUT_MS,
           userAgent: DEFAULT_SCRAPER_CONFIG.userAgent
         }),
-      3,
+      NEW_SITE_FETCH_ATTEMPTS,
       1000
     )
   );
 }
 
 /**
- * Fetch and merge all four new-site jurisprudence pages into one index,
- * deduped by normalized case number (English pages win).
- *
- * Fault tolerance: a page that fails to fetch is dropped, the others are
- * still used. If ALL pages fail, an empty array is returned (callers
- * degrade to API-only behavior) and the result is NOT cached, so a later
- * call retries instead of being pinned to the outage (no negative caching).
+ * In-flight coalescing: concurrent callers share one fetch round instead of
+ * each paying the full 4-page cost.
  */
-export async function getNewSiteIndex(): Promise<NewSiteEntry[]> {
-  const cached = newSiteCache.get(NEW_SITE_CACHE_KEY) as NewSiteEntry[] | null;
-  if (cached) return cached;
+let inFlightIndexPromise: Promise<NewSiteEntry[]> | null = null;
 
+async function buildNewSiteIndex(): Promise<NewSiteEntry[]> {
   const perPage = await Promise.all(
     NEW_SITE_PAGES.map(async (page) => {
       try {
@@ -161,6 +173,10 @@ export async function getNewSiteIndex(): Promise<NewSiteEntry[]> {
 
   const successful = perPage.filter((r): r is NewSiteEntry[] => r !== null);
   if (successful.length === 0) {
+    // Total failure: cache the empty index briefly so a burst of requests
+    // during an outage doesn't each pay the retry cost, without pinning the
+    // index to the outage for the full 30-minute TTL.
+    newSiteCache.set(NEW_SITE_CACHE_KEY, [] as NewSiteEntry[], NEW_SITE_NEGATIVE_TTL_MS);
     return [];
   }
 
@@ -176,4 +192,25 @@ export async function getNewSiteIndex(): Promise<NewSiteEntry[]> {
 
   newSiteCache.set(NEW_SITE_CACHE_KEY, merged);
   return merged;
+}
+
+/**
+ * Fetch and merge all four new-site jurisprudence pages into one index,
+ * deduped by normalized case number (English pages win).
+ *
+ * Fault tolerance: a page that fails to fetch is dropped, the others are
+ * still used. If ALL pages fail, an empty array is returned (callers
+ * degrade to API-only behavior) and cached for only NEW_SITE_NEGATIVE_TTL_MS
+ * so the next call after the outage recovers quickly.
+ */
+export function getNewSiteIndex(): Promise<NewSiteEntry[]> {
+  const cached = newSiteCache.get(NEW_SITE_CACHE_KEY) as NewSiteEntry[] | null;
+  if (cached) return Promise.resolve(cached);
+
+  if (!inFlightIndexPromise) {
+    inFlightIndexPromise = buildNewSiteIndex().finally(() => {
+      inFlightIndexPromise = null;
+    });
+  }
+  return inFlightIndexPromise;
 }

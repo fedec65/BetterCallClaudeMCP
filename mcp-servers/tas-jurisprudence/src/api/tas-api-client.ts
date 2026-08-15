@@ -546,13 +546,15 @@ export async function searchCasDecisions(input: CasSearchInput): Promise<CasSear
 
   // New-site fallback: awards published since the API went stale (2024+)
   // exist only on the relaunched site's recent-decisions pages. Triggered
-  // only for UNFILTERED queries with zero API hits — sport/procedure
+  // only for UNFILTERED queries with zero API hits — sport/procedure/year
   // filters are never silently widened onto a source that has no such
-  // metadata.
-  if (total === 0 && !input.sport && !input.procedure_type) {
-    finalResults = await searchNewSiteIndex(query);
-    total = finalResults.length;
-    hasMore = false;
+  // metadata (new-site entries carry no date, sport or procedure).
+  if (total === 0 && !input.sport && !input.procedure_type && !input.year_from && !input.year_to) {
+    const allMatches = await searchNewSiteIndex(query);
+    const start = (input.page - 1) * input.page_size;
+    finalResults = allMatches.slice(start, start + input.page_size);
+    total = allMatches.length;
+    hasMore = start + finalResults.length < allMatches.length;
   }
 
   const output: CasSearchOutput = {
@@ -753,13 +755,19 @@ export async function getRecentDecisions(limit: number = 10): Promise<CasRecentO
   params.set('OrderByColumn', 'DecisionDate');
   params.set('OrderByDirection', 'desc');
 
+  // The new-site index is fetched independently of the categorized API leg:
+  // an API outage must not discard new-site data (and vice versa).
+  const newSiteEntries = await safeGetNewSiteIndex();
+
+  let decisions: CasRecentDecision[] = [];
+  let apiError: string | null = null;
   try {
     const response = await apiFetchJson<TasSearchResponse>(
       `${API_BASE}/CaseLawDocument/SearchCaseLawDocument?${params.toString()}`
     );
     const items = (response.items ?? []).slice(0, safeLimit);
 
-    const decisions: CasRecentDecision[] = items.map((it) => {
+    decisions = items.map((it) => {
       const title = String(it.title ?? '').trim();
       let normalized: string;
       try {
@@ -782,39 +790,44 @@ export async function getRecentDecisions(limit: number = 10): Promise<CasRecentO
         source_url: buildDeepLink(title, it.guid)
       };
     });
-
-    // Merge in awards from the new-site index (2024+ awards not yet
-    // migrated into the categorized API). Entries already known to the API
-    // (by normalized case number) keep their API record with real metadata.
-    const newSiteEntries = await safeGetNewSiteIndex();
-    const known = new Set(decisions.map((d) => d.case_number_normalized));
-    const extras = newSiteEntries
-      .filter((e) => !known.has(e.caseNumberNormalized))
-      .map(mapNewSiteEntryToRecent);
-
-    // Sort by date desc; undated new-site items use the sort-only
-    // `${caseYear}-12-31` heuristic (see recentSortKey), then slice.
-    const merged = [...decisions, ...extras]
-      .sort((a, b) => recentSortKey(b).localeCompare(recentSortKey(a)))
-      .slice(0, safeLimit);
-
-    const output: CasRecentOutput = {
-      decisions: merged,
-      retrieved_at: new Date().toISOString(),
-      source: 'jurisprudence.tas-cas.org'
-    };
-    recentCache.set(cacheKey, output);
-    return output;
   } catch (error) {
-    // Mirror the prior tool's behavior: on failure return an empty list with
-    // an empty source so the caller doesn't crash.
-    const message = error instanceof Error ? error.message : 'Unknown error';
+    apiError = error instanceof Error ? error.message : 'Unknown error';
+  }
+
+  // Merge in awards from the new-site index (2024+ awards not yet
+  // migrated into the categorized API). Entries already known to the API
+  // (by normalized case number) keep their API record with real metadata.
+  const known = new Set(decisions.map((d) => d.case_number_normalized));
+  const extras = newSiteEntries
+    .filter((e) => !known.has(e.caseNumberNormalized))
+    .map(mapNewSiteEntryToRecent);
+
+  // Sort by date desc; undated new-site items use the sort-only
+  // `${caseYear}-12-31` heuristic (see recentSortKey), then slice.
+  const merged = [...decisions, ...extras]
+    .sort((a, b) => recentSortKey(b).localeCompare(recentSortKey(a)))
+    .slice(0, safeLimit);
+
+  if (apiError !== null && merged.length === 0) {
+    // Mirror the prior tool's behavior: on total failure return an empty
+    // list with an error source so the caller doesn't crash.
     return {
       decisions: [],
       retrieved_at: new Date().toISOString(),
-      source: `error: ${message}`
+      source: `error: ${apiError}`
     };
   }
+
+  const output: CasRecentOutput = {
+    decisions: merged,
+    retrieved_at: new Date().toISOString(),
+    source:
+      apiError === null
+        ? 'jurisprudence.tas-cas.org'
+        : `www.tas-cas.org recent-decisions (categorized API unavailable: ${apiError})`
+  };
+  recentCache.set(cacheKey, output);
+  return output;
 }
 
 // silence linter about unused helper
