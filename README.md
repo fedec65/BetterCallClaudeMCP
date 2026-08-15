@@ -131,6 +131,19 @@ docker run --rm -p 3000:3000 bcc-mcp
 curl -s localhost:3000/health
 ```
 
+### Configuration (environment variables)
+
+The shared configuration layer (`mcp-servers/shared/src/config/config.ts`) reads
+these variables:
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `DB_TYPE` | `sqlite` | Database backend (`sqlite` or `postgres`). |
+| `DB_DATABASE` | `$XDG_CACHE_HOME/bettercallclaude/bettercallclaude.db` (or `~/.cache/…`, `%LOCALAPPDATA%\…` on Windows) | SQLite file path, or database name for postgres. The default is an absolute path in the user cache dir — it is a regenerable scrape cache and never lands in your project working tree. |
+| `DB_HOST` / `DB_PORT` / `DB_USERNAME` / `DB_PASSWORD` | — | Postgres connection settings (required when `DB_TYPE=postgres`). |
+| `DB_POOL_SIZE` | `10` | Postgres pool size. |
+| `DB_SSL` | `false` | Enable SSL for postgres (`true`). |
+
 ## Using the servers with Claude
 
 ### Option A — HTTP (recommended, no install required)
