@@ -58,8 +58,19 @@ export async function httpFetch(
     });
 
     if (!response.ok) {
+      // Surface a short excerpt of the upstream error body (e.g. the JSON
+      // API's "Content field is required") so callers can diagnose 4xx
+      // responses without an extra round-trip.
+      let detail = '';
+      try {
+        const text = await response.text();
+        detail = text.slice(0, 300).trim();
+      } catch {
+        // ignore: response body unreadable
+      }
+      const suffix = detail ? ` — ${detail}` : '';
       throw new HttpError(
-        `HTTP ${response.status}: ${response.statusText}`,
+        `HTTP ${response.status}: ${response.statusText}${suffix}`,
         response.status,
         url
       );

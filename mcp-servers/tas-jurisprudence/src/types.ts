@@ -65,7 +65,7 @@ export type CasBySportInput = z.infer<typeof CasBySportInputSchema>;
  */
 export interface ParsedCaseNumber {
   year: number;
-  type: 'A' | 'O' | 'AD' | 'ADD' | 'ADV';  // Appeal, Ordinary, Ad hoc, Anti-Doping Division, Advisory
+  type: 'A' | 'O' | 'AD' | 'ADD' | 'ADV' | 'C';  // Appeal, Ordinary, Ad hoc, Anti-Doping Division, Advisory, Advisory-opinion (site uses 'C')
   number: number;
   original: string;
   normalized: string;
@@ -79,7 +79,7 @@ export interface CasSearchResult {
   case_number_normalized: string;
   title: string;
   sport: string | null;
-  procedure_type: 'Appeal' | 'Ordinary' | 'Anti-Doping' | 'Advisory';
+  procedure_type: 'Appeal' | 'Ordinary' | 'Anti-Doping' | 'Advisory' | null;
   date: string;
   parties: {
     appellant: string | null;
@@ -125,7 +125,7 @@ export interface CasAwardDetails {
   case_number_normalized: string;
   title: string;
   sport: string | null;
-  procedure_type: 'Appeal' | 'Ordinary' | 'Anti-Doping' | 'Advisory';
+  procedure_type: 'Appeal' | 'Ordinary' | 'Anti-Doping' | 'Advisory' | null;
   date: string;
   parties: {
     appellant: string | null;
@@ -248,13 +248,13 @@ export const TOOL_DEFINITIONS = [
   },
   {
     name: 'cas_get_award',
-    description: 'Retrieve detailed information about a specific CAS/TAS award including parties, arbitrators, keywords, and optionally the full text. Use case number like "CAS 2023/A/9876" or provide the award URL.',
+    description: 'Retrieve detailed information about a specific CAS/TAS award including parties, arbitrators, keywords, and a PDF link. The full text is available in the linked PDF (`pdf_url`); the `include_full_text` flag is accepted for backward compatibility but is a no-op. Use case number like "CAS 2023/A/9876" or provide the award URL.',
     inputSchema: {
       type: 'object' as const,
       properties: {
         case_number: { type: 'string', description: 'CAS case number (e.g., "CAS 2023/A/9876")' },
         url: { type: 'string', description: 'Direct URL to the award page' },
-        include_full_text: { type: 'boolean', description: 'Include full PDF text (default: false)' }
+        include_full_text: { type: 'boolean', description: 'Accepted for backward compatibility; the full text is only available via the linked PDF (pdf_url). Default: false.' }
       }
     },
     annotations: {

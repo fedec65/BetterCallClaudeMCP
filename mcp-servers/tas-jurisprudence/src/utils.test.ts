@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { normalizeCaseNumber, parseCaseNumber, generatePdfUrl } from './utils.js';
+import { normalizeCaseNumber, parseCaseNumber } from './utils.js';
 
 describe('normalizeCaseNumber', () => {
   it('normalizes a standard appeal case number', () => {
@@ -8,6 +8,10 @@ describe('normalizeCaseNumber', () => {
 
   it('accepts ADD (Anti-Doping Division) type', () => {
     expect(normalizeCaseNumber('CAS 2023/ADD/62')).toBe('CAS 2023/ADD/0062');
+  });
+
+  it('accepts C (Advisory opinion) type', () => {
+    expect(normalizeCaseNumber('CAS 2023/C/56')).toBe('CAS 2023/C/0056');
   });
 
   it('accepts joined cases', () => {
@@ -39,6 +43,13 @@ describe('parseCaseNumber', () => {
     expect(parsed.number).toBe(62);
   });
 
+  it('parses C (Advisory opinion) case numbers', () => {
+    const parsed = parseCaseNumber('CAS 2023/C/56');
+    expect(parsed.type).toBe('C');
+    expect(parsed.year).toBe(2023);
+    expect(parsed.number).toBe(56);
+  });
+
   it('uses the first number of joined cases', () => {
     const parsed = parseCaseNumber('CAS 2022/A/9328 & 9329');
     expect(parsed.number).toBe(9328);
@@ -49,15 +60,5 @@ describe('parseCaseNumber', () => {
     const parsed = parseCaseNumber('CAS 2022/A/8865-8868');
     expect(parsed.number).toBe(8865);
     expect(parsed.normalized).toBe('CAS 2022/A/8865-8868');
-  });
-});
-
-describe('generatePdfUrl', () => {
-  it('builds the PDF URL for ADD cases', () => {
-    expect(generatePdfUrl('CAS 2023/ADD/62')).toBe('https://www.tas-cas.org/files/decision/CAS-2023-ADD-0062.pdf');
-  });
-
-  it('builds the PDF URL from the first number of joined cases', () => {
-    expect(generatePdfUrl('CAS 2022/A/9328 & 9329')).toBe('https://www.tas-cas.org/files/decision/CAS-2022-A-9328.pdf');
   });
 });

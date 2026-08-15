@@ -43,15 +43,11 @@ FROM node:22-slim
 
 WORKDIR /app
 
-# Install only the runtime deps that were marked external in the bundle
-# (playwright + related). Keep dev deps out of the image.
+# Install only the bundle's runtime dependencies (axios, express, etc.).
+# The TAS jurisprudence rewrite no longer needs a browser; chromium is
+# gone from this image.
 COPY mcp-servers-http/package.json ./
 RUN npm install --omit=dev --no-package-lock
-
-# Install Chromium for the TAS jurisprudence scraper's Playwright path.
-# node:22-slim ships no browser; without this every TAS tool call fails.
-ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
-RUN npx playwright install --with-deps chromium
 
 COPY --from=build /repo/mcp-servers-http/dist/ ./dist/
 

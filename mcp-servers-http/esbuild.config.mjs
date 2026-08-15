@@ -46,9 +46,10 @@ await build({
   sourcemap: true,
   minify: false,
   // Keep heavy native/optional-dep packages out of the bundle so esbuild
-  // doesn't have to resolve dynamic requires. These are installed at runtime
-  // (see Dockerfile).
-  external: ['playwright', 'playwright-core', 'chromium-bidi'],
+  // doesn't have to resolve dynamic requires. The tas-jurisprudence rewrite
+  // no longer needs playwright at runtime, so the externals list is
+  // currently empty.
+  external: [],
   plugins: [tsResolvePlugin],
   banner: {
     js: `

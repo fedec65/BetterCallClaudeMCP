@@ -3,7 +3,6 @@
  * Express server with Streamable HTTP transport for remote deployment
  */
 
-import { existsSync, readdirSync } from 'node:fs';
 import express, { type Request, type Response } from 'express';
 import { createMcpServer } from './server.js';
 
@@ -195,18 +194,6 @@ app.listen(PORT, () => {
   console.log(`TAS/CAS Jurisprudence MCP Server running on port ${PORT}`);
   console.log(`MCP endpoint: http://localhost:${PORT}/tas-jurisprudence/mcp`);
   console.log(`Health check: http://localhost:${PORT}/health`);
-
-  // Debug: Check Playwright browser availability at startup
-  const expectedBrowserPath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH ||
-    '/ms-playwright/chromium-1091/chrome-linux/chrome';
-  console.log(`[Startup] Expected browser path: ${expectedBrowserPath}`);
-  console.log(`[Startup] Browser exists: ${existsSync(expectedBrowserPath)}`);
-
-  // List available browsers in /ms-playwright if it exists
-  if (existsSync('/ms-playwright')) {
-    const browsers = readdirSync('/ms-playwright');
-    console.log(`[Startup] Available browsers in /ms-playwright: ${browsers.join(', ')}`);
-  }
 });
 
 // Graceful shutdown

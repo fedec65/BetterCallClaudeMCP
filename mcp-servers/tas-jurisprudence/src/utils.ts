@@ -45,12 +45,13 @@ export function normalizeCaseNumber(input: string): string {
 
   const [, year, type, number] = match;
 
-  // Validate type
-  const validTypes = ['A', 'O', 'AD', 'ADD', 'ADV'] as const;
+  // Validate type. 'C' is the site's abbreviation for Advisory opinions and is
+  // accepted here so titles like "2023/C/0056" normalize cleanly.
+  const validTypes = ['A', 'O', 'AD', 'ADD', 'ADV', 'C'] as const;
   const normalizedType = type.toUpperCase();
 
   if (!validTypes.includes(normalizedType as typeof validTypes[number])) {
-    throw new Error(`Invalid case type: "${type}". Must be A (Appeal), O (Ordinary), AD (Ad hoc), ADD (Anti-Doping Division), or ADV (Advisory)`);
+    throw new Error(`Invalid case type: "${type}". Must be A (Appeal), O (Ordinary), AD (Ad hoc), ADD (Anti-Doping Division), ADV (Advisory), or C (Advisory opinion)`);
   }
 
   // Pad first number to at least 4 digits; preserve the compound form:
@@ -83,7 +84,8 @@ export function parseCaseNumber(caseNumber: string): ParsedCaseNumber {
     'O': 'O',
     'AD': 'AD',
     'ADD': 'ADD',
-    'ADV': 'ADV'
+    'ADV': 'ADV',
+    'C': 'C'
   };
 
   return {
@@ -94,38 +96,6 @@ export function parseCaseNumber(caseNumber: string): ParsedCaseNumber {
     original: caseNumber,
     normalized
   };
-}
-
-/**
- * Generate PDF URL from case number
- * Format: https://www.tas-cas.org/files/decision/CAS-YYYY-T-NNNN.pdf
- */
-export function generatePdfUrl(caseNumber: string): string {
-  const parsed = parseCaseNumber(caseNumber);
-  const paddedNumber = String(parsed.number).padStart(4, '0');
-  return `https://www.tas-cas.org/files/decision/CAS-${parsed.year}-${parsed.type}-${paddedNumber}.pdf`;
-}
-
-/**
- * Extract PDF URL from HTML content
- */
-export function extractPdfUrl(html: string): string | null {
-  // Look for PDF links in the HTML
-  const patterns = [
-    /href="([^"]+\.pdf)"/i,
-    /href='([^']+\.pdf)'/i,
-    /"(https?:\/\/[^"]+\.pdf)"/i,
-    /'(https?:\/\/[^']+\.pdf)'/i
-  ];
-
-  for (const pattern of patterns) {
-    const match = html.match(pattern);
-    if (match && match[1]) {
-      return match[1];
-    }
-  }
-
-  return null;
 }
 
 /**
