@@ -30,8 +30,10 @@ export function normalizeCaseNumber(input: string): string {
   cleaned = cleaned.replace(/[\s\-_]/g, '/');
 
   // Extract components using regex
-  // Format: YYYY/T/NNNN or YYYY/TT/NNNN (where T is type, TT can be AD for Anti-Doping)
-  const match = cleaned.match(/^(\d{4})\/?([AO]|AD|ADV)\/?(\d+)$/i);
+  // Format: YYYY/T/NNNN (T = type: A, O, AD, ADD, ADV).
+  // The number part may be compound: joined cases ("9328 & 9329") or ranges
+  // ("8915-8920") arrive slash/&-separated after separator normalization above.
+  const match = cleaned.match(/^(\d{4})\/?([A-Z]{1,4})\/?(\d+(?:[/&]+\d+)*)$/i);
 
   if (!match) {
     throw new Error(`Invalid case number format: "${input}". Expected format: YYYY/T/NNNN (e.g., 2023/A/9876)`);
@@ -40,15 +42,16 @@ export function normalizeCaseNumber(input: string): string {
   const [, year, type, number] = match;
 
   // Validate type
-  const validTypes = ['A', 'O', 'AD', 'ADV'] as const;
+  const validTypes = ['A', 'O', 'AD', 'ADD', 'ADV'] as const;
   const normalizedType = type.toUpperCase();
 
   if (!validTypes.includes(normalizedType as typeof validTypes[number])) {
-    throw new Error(`Invalid case type: "${type}". Must be A (Appeal), O (Ordinary), AD (Anti-Doping), or ADV (Advisory)`);
+    throw new Error(`Invalid case type: "${type}". Must be A (Appeal), O (Ordinary), AD (Ad hoc), ADD (Anti-Doping Division), or ADV (Advisory)`);
   }
 
-  // Pad number to at least 4 digits
-  const paddedNumber = number.padStart(4, '0');
+  // Pad first number to at least 4 digits; keep compound parts joined with " & "
+  const parts = number.split(/[/&]+/);
+  const paddedNumber = parts[0].padStart(4, '0') + (parts.length > 1 ? ' & ' + parts.slice(1).join(' & ') : '');
 
   return `CAS ${year}/${normalizedType}/${paddedNumber}`;
 }
@@ -59,8 +62,8 @@ export function normalizeCaseNumber(input: string): string {
 export function parseCaseNumber(caseNumber: string): ParsedCaseNumber {
   const normalized = normalizeCaseNumber(caseNumber);
 
-  // Extract from normalized format "CAS YYYY/T/NNNN"
-  const match = normalized.match(/^CAS (\d{4})\/([AO]|AD|ADV)\/(\d+)$/);
+  // Extract from normalized format "CAS YYYY/T/NNNN" (NNNN may be compound, e.g. "9328 & 9329")
+  const match = normalized.match(/^CAS (\d{4})\/([A-Z]{1,4})\/(\d+)(?:\s*&\s*\d+)*$/);
 
   if (!match) {
     throw new Error(`Failed to parse normalized case number: ${normalized}`);
@@ -68,16 +71,18 @@ export function parseCaseNumber(caseNumber: string): ParsedCaseNumber {
 
   const [, yearStr, typeStr, numberStr] = match;
 
-  const typeMap: Record<string, 'A' | 'O' | 'AD' | 'ADV'> = {
+  const typeMap: Record<string, ParsedCaseNumber['type']> = {
     'A': 'A',
     'O': 'O',
     'AD': 'AD',
+    'ADD': 'ADD',
     'ADV': 'ADV'
   };
 
   return {
     year: parseInt(yearStr, 10),
     type: typeMap[typeStr],
+    // First number of a compound case number (used to build the PDF URL)
     number: parseInt(numberStr, 10),
     original: caseNumber,
     normalized

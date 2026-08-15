@@ -79,8 +79,13 @@ function parseSearchResult($: cheerio.CheerioAPI, element: AnyNode): CasSearchRe
     // Build URL to decision page
     const url = `${BASE_URL}/decision/${year}/${procType}/${caseNumberText.padStart(4, '0')}`;
 
-    // Generate PDF URL
-    const pdfUrl = generatePdfUrl(caseNumberNormalized);
+    // Generate PDF URL (best-effort: unusual formats yield null, decision is kept)
+    let pdfUrl: string | null = null;
+    try {
+      pdfUrl = generatePdfUrl(caseNumberNormalized);
+    } catch {
+      // Keep the decision even if no PDF URL can be derived
+    }
 
     // Build snippet from outcome
     const snippet = outcome ? `Outcome: ${outcome}` : null;

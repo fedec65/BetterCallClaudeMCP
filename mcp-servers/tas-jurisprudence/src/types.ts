@@ -65,7 +65,7 @@ export type CasBySportInput = z.infer<typeof CasBySportInputSchema>;
  */
 export interface ParsedCaseNumber {
   year: number;
-  type: 'A' | 'O' | 'AD' | 'ADV';  // Appeal, Ordinary, Anti-Doping, Advisory
+  type: 'A' | 'O' | 'AD' | 'ADD' | 'ADV';  // Appeal, Ordinary, Ad hoc, Anti-Doping Division, Advisory
   number: number;
   original: string;
   normalized: string;
