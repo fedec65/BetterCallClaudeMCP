@@ -311,9 +311,14 @@ export class OnlineKommentarClient {
       try {
         await this.listLegislativeActs();
         legislativeActId = this.legislativeActMapping[parsed.act.toLowerCase()];
-      } catch {
-        // /api/legislative-acts has been removed upstream (404) — fall
-        // through to the title-based fallback below
+      } catch (error) {
+        // Tolerate only the known case of the referential endpoint having
+        // been removed upstream (404) — fall through to the title-based
+        // fallback below. Transient failures (timeouts, network) must
+        // surface as errors, not as an empty result.
+        if (!(error instanceof Error && error.message.startsWith('API error: 404'))) {
+          throw error;
+        }
       }
     }
 
@@ -348,7 +353,6 @@ export class OnlineKommentarClient {
           filtered.push(c);
         }
       }
-      if (filtered.length > 0) break;
     }
     return { commentaries: filtered, count: filtered.length, page: 1, total_pages: 1 };
   }
