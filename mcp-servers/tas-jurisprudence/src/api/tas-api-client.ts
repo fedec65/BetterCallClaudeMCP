@@ -614,8 +614,9 @@ export async function getAwardDetails(
 }
 
 /**
- * Get the most recent decisions. Relies on the API's default ordering
- * (decisionDate desc) when no explicit OrderByColumn is sent.
+ * Get the most recent decisions, ordered by decision date descending.
+ * The sort must be requested explicitly: without OrderByColumn the API
+ * returns case-number desc (insertion order), not decision date (#45).
  */
 export async function getRecentDecisions(limit: number = 10): Promise<CasRecentOutput> {
   const safeLimit = Math.min(Math.max(limit, 1), 50);
@@ -626,6 +627,8 @@ export async function getRecentDecisions(limit: number = 10): Promise<CasRecentO
   const params = new URLSearchParams();
   params.set('CurrentPage', '1');
   params.set('PageSize', String(safeLimit));
+  params.set('OrderByColumn', 'DecisionDate');
+  params.set('OrderByDirection', 'desc');
 
   try {
     const response = await apiFetchJson<TasSearchResponse>(
