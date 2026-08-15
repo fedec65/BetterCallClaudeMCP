@@ -447,6 +447,28 @@ describe('getRecentDecisions', () => {
     expect(result.decisions).toEqual([]);
     expect(result.source).toMatch(/^error:/);
   });
+
+  it('requests decision-date desc ordering from the API (#45)', async () => {
+    const fetchSpy = makeFetchSpy({
+      '/SearchCaseLawDocument': () =>
+        jsonResponse({
+          currentPage: 1, totalPages: 1, pageSize: 5, totalCount: 2,
+          hasPrevious: false, hasNext: false,
+          items: [
+            sampleSearchItem({ guid: 'g-1', title: '2023/A/9757', decisionDate: '2024-04-02T00:00:00' }),
+            sampleSearchItem({ guid: 'g-2', title: '2023/A/10168', decisionDate: '2024-02-29T00:00:00' })
+          ]
+        })
+    });
+
+    const result = await getRecentDecisions(5);
+
+    const requestedUrl = String(fetchSpy.mock.calls[0][0]);
+    expect(requestedUrl).toContain('OrderByColumn=DecisionDate');
+    expect(requestedUrl).toContain('OrderByDirection=desc');
+    // Decisions come back in date-desc order.
+    expect(result.decisions[0].date >= result.decisions[1].date).toBe(true);
+  });
 });
 
 describe('resilience', () => {
