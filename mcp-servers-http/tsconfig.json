@@ -17,7 +17,8 @@
       "@onlinekommentar/*": ["../mcp-servers/onlinekommentar/src/*"],
       "@fedlex-sparql/*": ["../mcp-servers/fedlex-sparql/src/*"],
       "@legal-persona/*": ["../mcp-servers/legal-persona/src/*"],
-      "@tas-jurisprudence/*": ["../mcp-servers/tas-jurisprudence/src/*"]
+      "@tas-jurisprudence/*": ["../mcp-servers/tas-jurisprudence/src/*"],
+      "@workflows/*": ["../mcp-servers/workflows/src/*"]
     }
   },
   "include": [
@@ -26,7 +27,8 @@
     "../mcp-servers/onlinekommentar/src/**/*.ts",
     "../mcp-servers/fedlex-sparql/src/**/*.ts",
     "../mcp-servers/legal-persona/src/**/*.ts",
-    "../mcp-servers/tas-jurisprudence/src/**/*.ts"
+    "../mcp-servers/tas-jurisprudence/src/**/*.ts",
+    "../mcp-servers/workflows/src/**/*.ts"
   ],
   "exclude": [
     "node_modules",
