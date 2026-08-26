@@ -1,6 +1,6 @@
 {
   "name": "@bettercallclaude/workflows-mcp",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "MCP server for custom reusable legal workflows (workflows-ch): pipeline validation, workflow persistence, run logging",
   "type": "module",
   "main": "dist/index.js",

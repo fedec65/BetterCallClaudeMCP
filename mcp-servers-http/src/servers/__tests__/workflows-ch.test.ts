@@ -4,7 +4,7 @@ import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { createWorkflowsChServer } from '../workflows-ch.js';
 
 describe('workflows-ch server', () => {
-  it('lists exactly the 7 workflow tools', async () => {
+  it('lists exactly the 8 workflow tools', async () => {
     const server = createWorkflowsChServer();
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
     const client = new Client({ name: 'smoke-test', version: '0.0.1' });
@@ -12,8 +12,8 @@ describe('workflows-ch server', () => {
 
     const { tools } = await client.listTools();
     expect(tools.map(t => t.name).sort()).toEqual([
-      'delete_workflow', 'get_workflow', 'list_agents', 'list_workflows',
-      'log_run', 'save_workflow', 'validate_pipeline'
+      'claim_user_id', 'delete_workflow', 'get_workflow', 'list_agents',
+      'list_workflows', 'log_run', 'save_workflow', 'validate_pipeline'
     ]);
 
     await client.close();

@@ -4,7 +4,7 @@ import type { AgentManifestEntry, ValidationError, ValidationResult } from './va
 import type {
   PipelineStep, Visibility,
   ValidatePipelineInput, SaveWorkflowInput, ListWorkflowsInput,
-  GetWorkflowInput, DeleteWorkflowInput, LogRunInput
+  GetWorkflowInput, DeleteWorkflowInput, LogRunInput, ClaimUserIdInput
 } from './types.js';
 
 export interface WorkflowRow {
@@ -123,4 +123,17 @@ export async function logRun(
     [input.workflow_id, input.user_id, input.status, input.output_summary ?? null]
   );
   return { run_id: rows[0].id };
+}
+
+export async function claimUserId(
+  pool: Pool,
+  input: ClaimUserIdInput
+): Promise<{ claimed: boolean; user_id: string }> {
+  const { rows } = await pool.query(
+    `INSERT INTO claimed_ids (user_id) VALUES ($1)
+     ON CONFLICT (user_id) DO NOTHING
+     RETURNING user_id`,
+    [input.user_id]
+  );
+  return { claimed: rows.length > 0, user_id: input.user_id };
 }

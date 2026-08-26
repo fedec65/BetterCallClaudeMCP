@@ -64,3 +64,8 @@ export const LogRunInputSchema = z.object({
   output_summary: z.string().max(4000).optional()
 });
 export type LogRunInput = z.infer<typeof LogRunInputSchema>;
+
+export const ClaimUserIdInputSchema = z.object({
+  user_id: UserIdSchema
+});
+export type ClaimUserIdInput = z.infer<typeof ClaimUserIdInputSchema>;

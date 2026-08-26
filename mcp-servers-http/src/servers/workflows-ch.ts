@@ -7,9 +7,10 @@ import { z } from 'zod';
 import {
   getPool, ensureSchema,
   listAgents, validatePipelineTool, saveWorkflow, listWorkflows,
-  getWorkflow, deleteWorkflow, logRun, WorkflowValidationError,
+  getWorkflow, deleteWorkflow, logRun, claimUserId, WorkflowValidationError,
   SaveWorkflowInputSchema, ListWorkflowsInputSchema, GetWorkflowInputSchema,
-  DeleteWorkflowInputSchema, LogRunInputSchema, ValidatePipelineInputSchema
+  DeleteWorkflowInputSchema, LogRunInputSchema, ValidatePipelineInputSchema,
+  ClaimUserIdInputSchema
 } from '@workflows/index.js';
 
 const PIPELINE_STEP = {
@@ -30,7 +31,7 @@ const USER_ID = {
 
 export function createWorkflowsChServer(): Server {
   const server = new Server(
-    { name: 'workflows-ch', version: '1.0.0' },
+    { name: 'workflows-ch', version: '1.1.0' },
     { capabilities: { tools: {} } }
   );
 
@@ -109,6 +110,16 @@ export function createWorkflowsChServer(): Server {
         }
       },
       {
+        name: 'claim_user_id',
+        description: 'Reserve a user_id namespace. Returns claimed:true if you got it, false if already taken.',
+        annotations: { readOnlyHint: false, destructiveHint: false },
+        inputSchema: {
+          type: 'object',
+          properties: { user_id: USER_ID },
+          required: ['user_id']
+        }
+      },
+      {
         name: 'log_run',
         description: 'Record a workflow execution in the audit trail (workflow_runs).',
         annotations: { readOnlyHint: false, destructiveHint: false },
@@ -168,6 +179,11 @@ export function createWorkflowsChServer(): Server {
           const input = LogRunInputSchema.parse(args);
           await ensureSchema();
           return json(await logRun(getPool(), input));
+        }
+        case 'claim_user_id': {
+          const input = ClaimUserIdInputSchema.parse(args);
+          await ensureSchema();
+          return json(await claimUserId(getPool(), input));
         }
         default:
           throw new Error(`Unknown tool: ${name}`);

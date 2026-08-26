@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { getPool, ensureSchema, closePool } from '../db.js';
 import {
   listAgents, validatePipelineTool, saveWorkflow, listWorkflows,
-  getWorkflow, deleteWorkflow, logRun, WorkflowValidationError
+  getWorkflow, deleteWorkflow, logRun, claimUserId, WorkflowValidationError
 } from '../tools.js';
 
 const url = process.env.WORKFLOWS_TEST_DATABASE_URL;
@@ -26,6 +26,7 @@ describe.skipIf(!url)('tools (integration, needs WORKFLOWS_TEST_DATABASE_URL)', 
   afterAll(async () => {
     await pool().query('DELETE FROM workflow_runs');
     await pool().query('DELETE FROM workflows');
+    await pool().query('DELETE FROM claimed_ids');
     await closePool();
   });
 
@@ -102,5 +103,21 @@ describe.skipIf(!url)('tools (integration, needs WORKFLOWS_TEST_DATABASE_URL)', 
       'SELECT count(*)::int AS n FROM workflow_runs WHERE workflow_id = $1', [w.workflow.id]
     );
     expect(runs.rows[0].n).toBe(0);
+  });
+
+  it('claimUserId claims a fresh id, rejects duplicates, allows other ids', async () => {
+    const first = await claimUserId(pool(), { user_id: 'claim-user-a' });
+    expect(first).toEqual({ claimed: true, user_id: 'claim-user-a' });
+    const again = await claimUserId(pool(), { user_id: 'claim-user-a' });
+    expect(again).toEqual({ claimed: false, user_id: 'claim-user-a' });
+    const other = await claimUserId(pool(), { user_id: 'claim-user-b' });
+    expect(other).toEqual({ claimed: true, user_id: 'claim-user-b' });
+  });
+
+  it('a claimed id does not interfere with saveWorkflow under that id', async () => {
+    await claimUserId(pool(), { user_id: 'claim-and-save' });
+    const saved = await saveWorkflow(pool(), { ...base, user_id: 'claim-and-save', slug: 'post-claim' });
+    expect(saved.saved).toBe(true);
+    expect(saved.workflow.user_id).toBe('claim-and-save');
   });
 });

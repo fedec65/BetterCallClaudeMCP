@@ -36,4 +36,9 @@ CREATE TABLE IF NOT EXISTS workflow_runs (
     status          TEXT CHECK (status IN ('running','completed','failed','abandoned')),
     output_summary  TEXT
 );
+
+CREATE TABLE IF NOT EXISTS claimed_ids (
+    user_id         TEXT PRIMARY KEY,
+    created_at      TIMESTAMPTZ DEFAULT now()
+);
 `;
