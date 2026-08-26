@@ -67,6 +67,7 @@ const __dirname = dirname(__filename);
     '@fedlex-sparql': '../mcp-servers/fedlex-sparql/src',
     '@legal-persona': '../mcp-servers/legal-persona/src',
     '@tas-jurisprudence': '../mcp-servers/tas-jurisprudence/src',
+    '@workflows': '../mcp-servers/workflows/src',
   },
 });
 

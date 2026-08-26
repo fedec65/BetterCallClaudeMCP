@@ -15,6 +15,7 @@
     "mcp-servers/integration-tests",
     "mcp-servers/legal-persona",
     "mcp-servers/tas-jurisprudence",
+    "mcp-servers/workflows",
     "packages/widgets-common",
     "mcp-servers-http"
   ],

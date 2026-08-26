@@ -21,6 +21,7 @@ COPY mcp-servers/legal-citations/package.json ./mcp-servers/legal-citations/
 COPY mcp-servers/legal-persona/package.json ./mcp-servers/legal-persona/
 COPY mcp-servers/onlinekommentar/package.json ./mcp-servers/onlinekommentar/
 COPY mcp-servers/tas-jurisprudence/package.json ./mcp-servers/tas-jurisprudence/
+COPY mcp-servers/workflows/package.json ./mcp-servers/workflows/
 COPY mcp-servers/shared/package.json ./mcp-servers/shared/
 COPY mcp-servers/integration-tests/package.json ./mcp-servers/integration-tests/
 COPY packages/widgets-common/package.json ./packages/widgets-common/

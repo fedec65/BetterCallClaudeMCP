@@ -1,7 +1,7 @@
 /**
  * BetterCallClaude MCP HTTP Service
  *
- * Hosts all 7 Swiss legal intelligence MCP servers behind
+ * Hosts all 8 Swiss legal intelligence MCP servers behind
  * StreamableHTTPServerTransport in stateless mode.
  *
  * Endpoints:
@@ -12,6 +12,7 @@
  *   POST /onlinekommentar/mcp
  *   POST /legal-persona/mcp
  *   POST /tas-jurisprudence/mcp
+ *   POST /workflows-ch/mcp
  *   GET  /health
  */
 
@@ -29,6 +30,7 @@ import { createLegalCitationsServer } from './servers/legal-citations.js';
 import { createOnlinekommentarServer } from './servers/onlinekommentar.js';
 import { createLegalPersonaHttpServer } from './servers/legal-persona.js';
 import { createTasJurisprudenceServer } from './servers/tas-jurisprudence.js';
+import { createWorkflowsChServer } from './servers/workflows-ch.js';
 
 // --- App setup ---
 
@@ -69,6 +71,7 @@ const SERVER_NAMES = [
   'onlinekommentar',
   'legal-persona',
   'tas-jurisprudence',
+  'workflows-ch',
 ];
 
 app.get('/health', (_req: Request, res: Response) => {
@@ -145,6 +148,7 @@ const routes: Array<[string, ServerFactory]> = [
   ['/onlinekommentar/mcp', createOnlinekommentarServer],
   ['/legal-persona/mcp', createLegalPersonaHttpServer],
   ['/tas-jurisprudence/mcp', createTasJurisprudenceServer],
+  ['/workflows-ch/mcp', createWorkflowsChServer],
 ];
 
 for (const [path, factory] of routes) {
