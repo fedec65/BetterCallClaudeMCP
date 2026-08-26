@@ -42,4 +42,22 @@ describe('getPool (unit)', () => {
     expect(() => getPool()).toThrow('DATABASE_URL');
     if (saved) process.env.DATABASE_URL = saved;
   });
+
+  it('forces relaxed SSL for remote hosts without sslmode', async () => {
+    await closePool();
+    const pool = getPool('postgres://user:pass@db.example.com:5432/app');
+    expect(pool.options.ssl).toEqual({ rejectUnauthorized: false });
+  });
+
+  it('honors an explicit sslmode instead of forcing SSL', async () => {
+    await closePool();
+    const pool = getPool('postgres://user:pass@postgres.railway.internal:5432/app?sslmode=disable');
+    expect(pool.options.ssl).toBeUndefined();
+  });
+
+  it('does not set SSL for localhost', async () => {
+    await closePool();
+    const pool = getPool('postgres://user:pass@localhost:5432/app');
+    expect(pool.options.ssl).toBeUndefined();
+  });
 });

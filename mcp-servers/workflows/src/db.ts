@@ -14,11 +14,14 @@ export function getPool(connectionString?: string): Pool {
       );
     }
     // Local Postgres (dev/test containers) has no SSL; managed Postgres (Railway) requires it.
+    // An explicit sslmode in the connection string wins: an `ssl` option here would
+    // override it and break e.g. Railway private-network Postgres (`sslmode=disable`).
     const isLocal = /^(postgres(ql)?:\/\/)?[^@/]*@?(localhost|127\.0\.0\.1|\[::1\])(:|\/|$)/.test(cs);
+    const hasSslmode = /[?&]sslmode=/.test(cs);
     pool = new Pool({
       connectionString: cs,
       max: 5,
-      ssl: isLocal ? false : { rejectUnauthorized: false }
+      ssl: isLocal || hasSslmode ? undefined : { rejectUnauthorized: false }
     });
   }
   return pool;

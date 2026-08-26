@@ -133,6 +133,7 @@ export function createWorkflowsChServer(): Server {
       // input returns a zod error envelope even when DATABASE_URL is unset.
       switch (name) {
         case 'list_agents': {
+          await ensureSchema();
           const pool = getPool();
           return json(await listAgents(pool));
         }
