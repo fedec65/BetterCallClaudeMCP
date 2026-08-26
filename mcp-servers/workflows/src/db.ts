@@ -41,7 +41,12 @@ export function ensureSchema(p: Pool = getPool()): Promise<void> {
           `INSERT INTO agents_manifest
              (agent_id, display_name, input_types, output_types, mcp_servers, is_terminal)
            VALUES ($1, $2, $3, $4, $5, $6)
-           ON CONFLICT (agent_id) DO NOTHING`,
+           ON CONFLICT (agent_id) DO UPDATE SET
+             display_name = EXCLUDED.display_name,
+             input_types  = EXCLUDED.input_types,
+             output_types = EXCLUDED.output_types,
+             mcp_servers  = EXCLUDED.mcp_servers,
+             is_terminal  = EXCLUDED.is_terminal`,
           [a.agent_id, a.display_name, a.input_types, a.output_types, a.mcp_servers, a.is_terminal]
         );
       }

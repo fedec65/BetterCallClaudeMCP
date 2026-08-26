@@ -29,7 +29,7 @@ CREATE TABLE IF NOT EXISTS workflows (
 
 CREATE TABLE IF NOT EXISTS workflow_runs (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    workflow_id     UUID REFERENCES workflows(id),
+    workflow_id     UUID REFERENCES workflows(id) ON DELETE CASCADE,
     user_id         TEXT NOT NULL,
     started_at      TIMESTAMPTZ DEFAULT now(),
     completed_at    TIMESTAMPTZ,

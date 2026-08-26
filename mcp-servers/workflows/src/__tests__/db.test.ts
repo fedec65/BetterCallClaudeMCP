@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { getPool, ensureSchema, closePool } from '../db.js';
+import { AGENTS_MANIFEST } from '../manifest.js';
 
 const url = process.env.WORKFLOWS_TEST_DATABASE_URL;
 const run = !!url;
@@ -31,6 +32,24 @@ describe.skipIf(!run)('db (integration, needs WORKFLOWS_TEST_DATABASE_URL)', () 
     await ensureSchema(getPool(url));
     const agents = await getPool(url).query('SELECT count(*)::int AS n FROM agents_manifest');
     expect(agents.rows[0].n).toBe(16);
+  });
+
+  it('re-seed after a manifest edit updates the row (ON CONFLICT DO UPDATE)', async () => {
+    const entry = AGENTS_MANIFEST.find(a => a.agent_id === 'researcher')!;
+    const original = entry.display_name;
+    entry.display_name = 'Mutated Researcher';
+    try {
+      await closePool(); // resets the memoized schemaReady so the seed re-runs
+      await ensureSchema(getPool(url));
+      const row = await getPool(url).query(
+        'SELECT display_name FROM agents_manifest WHERE agent_id = $1', ['researcher']
+      );
+      expect(row.rows[0].display_name).toBe('Mutated Researcher');
+    } finally {
+      entry.display_name = original;
+      await closePool(); // re-seed with the restored manifest for later tests
+      await ensureSchema(getPool(url));
+    }
   });
 });
 

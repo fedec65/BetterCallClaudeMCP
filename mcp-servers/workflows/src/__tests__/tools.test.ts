@@ -91,4 +91,16 @@ describe.skipIf(!url)('tools (integration, needs WORKFLOWS_TEST_DATABASE_URL)', 
     });
     expect(run.run_id).toMatch(/^[0-9a-f-]{36}$/);
   });
+
+  it('deleteWorkflow cascades to logged runs (ON DELETE CASCADE)', async () => {
+    const w = await saveWorkflow(pool(), { ...base, slug: 'cascade-me' });
+    await logRun(pool(), {
+      workflow_id: w.workflow.id, user_id: U, status: 'completed', output_summary: 'run'
+    });
+    expect((await deleteWorkflow(pool(), { user_id: U, slug: 'cascade-me' })).deleted).toBe(true);
+    const runs = await pool().query(
+      'SELECT count(*)::int AS n FROM workflow_runs WHERE workflow_id = $1', [w.workflow.id]
+    );
+    expect(runs.rows[0].n).toBe(0);
+  });
 });
